@@ -349,6 +349,7 @@
 import { initializeApp }                                from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import { getAuth, signInWithEmailAndPassword,
          createUserWithEmailAndPassword,
+         RecaptchaVerifier, signInWithPhoneNumber,
          onAuthStateChanged, signOut }                  from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import { getFirestore, doc, getDoc, setDoc }            from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
@@ -365,10 +366,9 @@ const app  = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db   = getFirestore(app);
 
-// No setPersistence — removed because it was crashing the module on mobile
-// Firebase Auth already persists sessions via IndexedDB by default in modern browsers
+// No setPersistence — Firebase Auth persists sessions by default via IndexedDB
 
-// Load data from Firestore — user passed in to avoid relying on auth.currentUser timing
+// ── Firestore helpers (uid passed explicitly — never rely on auth.currentUser timing) ──
 window._apiLoad = async function(uid){
   if(!uid) throw new Error('Not logged in');
   const snap = await getDoc(doc(db, 'ledgers', uid));
@@ -376,8 +376,6 @@ window._apiLoad = async function(uid){
   const raw = snap.data().data;
   return typeof raw === 'string' ? raw : JSON.stringify(raw);
 };
-
-// Save data to Firestore — user passed in to avoid relying on auth.currentUser timing
 window._apiSave = async function(jsonStr, uid){
   if(!uid) throw new Error('Not logged in');
   await setDoc(doc(db, 'ledgers', uid), {
@@ -387,6 +385,17 @@ window._apiSave = async function(jsonStr, uid){
   });
 };
 
+// ── reCAPTCHA for phone auth ──
+let recaptchaVerifier = null;
+let confirmationResult = null;
+
+function ensureRecaptcha(){
+  if(!recaptchaVerifier){
+    recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', { size: 'invisible' });
+  }
+}
+
+// ── Auth UI ──
 function showAuthUI(){
   const overlay = document.createElement('div');
   overlay.id = 'authOverlay';
@@ -397,20 +406,47 @@ function showAuthUI(){
         <h1>📒 Finance Ledger</h1>
         <p>Sign in to sync your ledger across all devices</p>
       </div>
-      <div class="auth-tabs">
-        <button class="auth-tab active" id="tabLogin" onclick="window._authTab('login')">Sign In</button>
-        <button class="auth-tab" id="tabSignup" onclick="window._authTab('signup')">Create Account</button>
+      <div class="auth-tabs" style="display:grid;grid-template-columns:1fr 1fr 1fr;">
+        <button class="auth-tab active" id="tabLogin"  onclick="window._authTab('login')">Sign In</button>
+        <button class="auth-tab"        id="tabPhone"  onclick="window._authTab('phone')">📱 OTP</button>
+        <button class="auth-tab"        id="tabSignup" onclick="window._authTab('signup')">Register</button>
       </div>
+
+      <!-- Email login -->
       <div id="authLoginForm">
         <div class="auth-field"><label>Email</label><input id="auth_email" type="email" placeholder="you@example.com" autocomplete="email"></div>
         <div class="auth-field"><label>Password</label><input id="auth_pass" type="password" placeholder="••••••••" autocomplete="current-password"></div>
         <button class="btn btn-primary btn-block" id="authBtn" onclick="window._doAuth()">Sign In</button>
       </div>
+
+      <!-- Phone OTP login -->
+      <div id="authPhoneForm" style="display:none;">
+        <div id="phoneStep1">
+          <div class="auth-field">
+            <label>Mobile Number</label>
+            <input id="auth_phone" type="tel" placeholder="+91 98765 43210" autocomplete="tel">
+            <div style="font-size:10px;color:var(--ink-soft);margin-top:3px;">Include country code e.g. +91 for India</div>
+          </div>
+          <div id="recaptcha-container"></div>
+          <button class="btn btn-primary btn-block" id="sendOtpBtn" onclick="window._sendOtp()">Send OTP</button>
+        </div>
+        <div id="phoneStep2" style="display:none;">
+          <div class="auth-field">
+            <label>Enter OTP</label>
+            <input id="auth_otp" type="number" placeholder="6-digit code" autocomplete="one-time-code" style="letter-spacing:4px;font-size:18px;text-align:center;">
+          </div>
+          <button class="btn btn-primary btn-block" id="verifyOtpBtn" onclick="window._verifyOtp()">Verify & Sign In</button>
+          <button class="btn btn-ghost btn-block" style="margin-top:8px;" onclick="window._authTab('phone')">← Change Number</button>
+        </div>
+      </div>
+
+      <!-- Email signup -->
       <div id="authSignupForm" style="display:none;">
         <div class="auth-field"><label>Email</label><input id="auth_email2" type="email" placeholder="you@example.com" autocomplete="email"></div>
         <div class="auth-field"><label>Password</label><input id="auth_pass2" type="password" placeholder="At least 8 characters" autocomplete="new-password"></div>
         <button class="btn btn-primary btn-block" id="signupBtn" onclick="window._doSignup()">Create Account</button>
       </div>
+
       <div id="authErr" class="auth-err"></div>
       <div class="auth-note">Your data is encrypted and synced securely to Firebase.</div>
     </div>`;
@@ -418,27 +454,37 @@ function showAuthUI(){
 
   overlay.addEventListener('keydown', e => {
     if(e.key === 'Enter'){
-      const isSignup = document.getElementById('authSignupForm').style.display !== 'none';
-      if(isSignup) window._doSignup(); else window._doAuth();
+      const tab = document.getElementById('tabPhone')?.classList.contains('active') ? 'phone'
+                : document.getElementById('tabSignup')?.classList.contains('active') ? 'signup' : 'login';
+      if(tab === 'login') window._doAuth();
+      else if(tab === 'signup') window._doSignup();
+      else if(document.getElementById('phoneStep2')?.style.display !== 'none') window._verifyOtp();
+      else window._sendOtp();
     }
   });
 }
 
 window._authTab = function(tab){
-  const loginForm  = document.getElementById('authLoginForm');
-  const signupForm = document.getElementById('authSignupForm');
-  const tabLogin   = document.getElementById('tabLogin');
-  const tabSignup  = document.getElementById('tabSignup');
+  ['authLoginForm','authPhoneForm','authSignupForm'].forEach(id=>{
+    document.getElementById(id).style.display = 'none';
+  });
+  ['tabLogin','tabPhone','tabSignup'].forEach(id=>document.getElementById(id)?.classList.remove('active'));
   if(tab === 'login'){
-    loginForm.style.display = ''; signupForm.style.display = 'none';
-    tabLogin.classList.add('active'); tabSignup.classList.remove('active');
+    document.getElementById('authLoginForm').style.display = '';
+    document.getElementById('tabLogin').classList.add('active');
+  } else if(tab === 'phone'){
+    document.getElementById('authPhoneForm').style.display = '';
+    document.getElementById('tabPhone').classList.add('active');
+    document.getElementById('phoneStep1').style.display = '';
+    document.getElementById('phoneStep2').style.display = 'none';
   } else {
-    loginForm.style.display = 'none'; signupForm.style.display = '';
-    tabLogin.classList.remove('active'); tabSignup.classList.add('active');
+    document.getElementById('authSignupForm').style.display = '';
+    document.getElementById('tabSignup').classList.add('active');
   }
   document.getElementById('authErr').textContent = '';
 };
 
+// Email sign in
 window._doAuth = async function(){
   const email = document.getElementById('auth_email').value.trim();
   const pass  = document.getElementById('auth_pass').value;
@@ -448,7 +494,6 @@ window._doAuth = async function(){
   btn.textContent = 'Signing in…'; btn.disabled = true; errEl.textContent = '';
   try{
     await signInWithEmailAndPassword(auth, email, pass);
-    // onAuthStateChanged will fire and start the app
   } catch(err){
     const msg = err.code === 'auth/invalid-credential' ? 'Invalid email or password.'
               : err.code === 'auth/too-many-requests'  ? 'Too many attempts. Try again later.'
@@ -458,6 +503,7 @@ window._doAuth = async function(){
   }
 };
 
+// Email sign up
 window._doSignup = async function(){
   const email = document.getElementById('auth_email2').value.trim();
   const pass  = document.getElementById('auth_pass2').value;
@@ -468,7 +514,6 @@ window._doSignup = async function(){
   btn.textContent = 'Creating…'; btn.disabled = true; errEl.textContent = '';
   try{
     await createUserWithEmailAndPassword(auth, email, pass);
-    // onAuthStateChanged will fire and start the app
   } catch(err){
     const msg = err.code === 'auth/email-already-in-use' ? 'This email is already registered. Please sign in.'
               : (err.message || 'Signup failed.');
@@ -477,16 +522,63 @@ window._doSignup = async function(){
   }
 };
 
-// Listen for auth state — fires on login, signup, and page reload (stays logged in)
+// Phone — send OTP
+window._sendOtp = async function(){
+  const phone = document.getElementById('auth_phone').value.trim();
+  const errEl = document.getElementById('authErr');
+  const btn   = document.getElementById('sendOtpBtn');
+  if(!phone){ errEl.textContent = 'Please enter your mobile number.'; return; }
+  btn.textContent = 'Sending…'; btn.disabled = true; errEl.textContent = '';
+  try{
+    ensureRecaptcha();
+    confirmationResult = await signInWithPhoneNumber(auth, phone, recaptchaVerifier);
+    document.getElementById('phoneStep1').style.display = 'none';
+    document.getElementById('phoneStep2').style.display = '';
+    errEl.style.color = 'var(--green)';
+    errEl.textContent = '✅ OTP sent! Check your messages.';
+  } catch(err){
+    const msg = err.code === 'auth/invalid-phone-number' ? 'Invalid phone number. Use format: +91XXXXXXXXXX'
+              : err.code === 'auth/too-many-requests'    ? 'Too many attempts. Try again later.'
+              : (err.message || 'Failed to send OTP.');
+    errEl.style.color = 'var(--maroon)';
+    errEl.textContent = msg;
+    btn.textContent = 'Send OTP'; btn.disabled = false;
+    recaptchaVerifier = null; // reset so it can retry
+  }
+};
+
+// Phone — verify OTP
+window._verifyOtp = async function(){
+  const otp   = document.getElementById('auth_otp').value.trim();
+  const errEl = document.getElementById('authErr');
+  const btn   = document.getElementById('verifyOtpBtn');
+  if(!otp || otp.length < 6){ errEl.textContent = 'Please enter the 6-digit OTP.'; return; }
+  btn.textContent = 'Verifying…'; btn.disabled = true;
+  errEl.style.color = 'var(--maroon)'; errEl.textContent = '';
+  try{
+    await confirmationResult.confirm(otp);
+    // onAuthStateChanged will fire and start the app
+  } catch(err){
+    const msg = err.code === 'auth/invalid-verification-code' ? 'Wrong OTP. Please check and try again.'
+              : err.code === 'auth/code-expired'              ? 'OTP expired. Please go back and resend.'
+              : (err.message || 'Verification failed.');
+    errEl.textContent = msg;
+    btn.textContent = 'Verify & Sign In'; btn.disabled = false;
+  }
+};
+
+// Auth state listener
 onAuthStateChanged(auth, user => {
   if(user){
     document.getElementById('authOverlay')?.remove();
-    window._fbReady = true;
-    window._fbUid = user.uid; // expose UID to main script
+    window._fbReady  = true;
+    window._fbUid    = user.uid;
+    window._fbEmail  = user.email || user.phoneNumber || '—';
     window._startApp();
   } else {
     window._fbReady = false;
-    window._fbUid = null;
+    window._fbUid   = null;
+    window._fbEmail = null;
     showAuthUI();
   }
 });
@@ -545,7 +637,6 @@ async function loadData(){
         setSyncDot('ok');
         if(raw) localStorage.setItem(LS_KEY, raw);
         else {
-          // Nothing in Firestore yet — push local data up if any
           raw = localStorage.getItem(LS_KEY);
           if(raw){ await window._apiSave(raw, window._fbUid); setSyncDot('ok'); }
         }
@@ -1438,7 +1529,9 @@ function settingsForm(){
       <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--navy); margin-bottom:10px;">☁️ Mobile ↔ Desktop Sync</div>
       <div id="syncStatusBox" style="background:#EEF3FF; border:1.5px solid #C5D3F5; border-radius:10px; padding:12px 13px; font-size:12.5px; line-height:1.7; color:#1B2A4A; margin-bottom:10px;">
         ${window._fbReady
-          ? '<b>✅ Cloud Sync Active</b><br>Your data syncs automatically across all devices.<br>Open this app on any device and sign in with the same account.'
+          ? `<b>✅ Cloud Sync Active</b><br>Signed in as:<br>
+             <span style="font-family:'IBM Plex Mono';font-size:12px;font-weight:600;color:#1B2A4A;word-break:break-all">${window._fbEmail||'—'}</span><br>
+             <span style="font-size:10px;color:#888;">User ID: ${window._fbUid||'—'}</span>`
           : '<b>⚠️ Not Signed In</b><br>Data is saved on this device only.<br>Sign in to enable cloud sync across devices.'}
       </div>
       ${!window._fbReady ? `<button class="btn btn-primary btn-block" style="margin-bottom:8px;" onclick="closeModal(); location.reload();">Sign In for Cloud Sync</button>` : `<button class="btn btn-ghost btn-block" style="margin-bottom:8px;" onclick="window._logout && window._logout()">Sign Out</button>`}
