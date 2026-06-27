@@ -368,7 +368,12 @@ const auth = getAuth(app);
 const db   = getFirestore(app);
 
 // Force IndexedDB persistence — works on mobile Chrome without third-party cookies
-await setPersistence(auth, indexedDBLocalPersistence);
+// Wrapped in try/catch so a failure (e.g. private browsing) doesn't crash the auth module
+try {
+  await setPersistence(auth, indexedDBLocalPersistence);
+} catch(e) {
+  console.warn('IndexedDB persistence unavailable, falling back to default:', e.message);
+}
 
 // Load data from Firestore
 window._apiLoad = async function(){
