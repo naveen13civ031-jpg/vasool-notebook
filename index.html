@@ -656,9 +656,9 @@ const LANG = {
     investment:'Investment', withdrawal:'Withdrawal', expense:'Expense',
     settings:'Settings', bizName:'Business name', language:'Language', tamil:'தமிழ்',
     save:'Save', cancel:'Cancel', confirm:'Confirm', close:'Close',
-    nextDue:'Next due', started:'Started', fullyRepaid:'✓ Loan fully repaid',
+    nextDue:'Next due', started:'Started', fullyRepaid:T('fullyRepaid'),
     referredBy:'Referred by', joinDate:'Joined', area:'Area', mobile:'Mobile',
-    noLoans:'No loans yet for this customer.', noCustomers:'No customers in this tab yet.',
+    noLoans:T('noLoans'), noCustomers:'No customers in this tab yet.',
     ledgerEmpty:'Your ledger is empty.', createTab:'Create a collection tab and add your first customer to begin.',
     allClear:'✓ All clear — nothing due or overdue today.',
     topReferrers:'🤝 Top Referrers', referred:'referred',
@@ -715,6 +715,14 @@ const LANG = {
     custArea:'பகுதி', custJoin:'சேர்ந்த தேதி', referral:'அறிமுகப்படுத்தியவர்', saveCust:'வாடிக்கையாளர் சேமி', addCust:'வாடிக்கையாளர் சேர்', editCust:'வாடிக்கையாளர் திருத்து',
     weekly:'வாராந்திரம்', daily:'தினசரி', monthly2:'மாதாந்திரம்',
     editCollTitle:'வசூல் பதிவு திருத்து',
+    tabSaved:'தாவல் சேமிக்கப்பட்டது', custSaved:'வாடிக்கையாளர் சேமிக்கப்பட்டது',
+    loanCreated:'கடன் உருவாக்கப்பட்டது', loanSaved:'கடன் சேமிக்கப்பட்டது',
+    emiSchedule:'தவணை அட்டவணை', emiHistory:'தவணை வரலாறு',
+    paymentCollections:'பணம் வசூல்கள்', noData:'பணம் எதுவும் பதிவு இல்லை.',
+    exportXlsx:'⬇️ Excel இறக்கு', todaysCols:'இன்றைய வசூல்கள்',
+    monthSummary:'இந்த மாத சுருக்கம்', customCollectTitle:'தனிப்பயன் தொகை வசூல்',
+    emiSchedule:'தவணை அட்டவணை', addLoan:'புதிய கடன்', createLoan:'கடன் உருவாக்கு',
+    noReferral:'— பரிந்துரை இல்லை —',
   }
 };
 function T(key){ const lang = (state&&state.lang==='ta')?'ta':'en'; return (LANG[lang]&&LANG[lang][key]) || LANG.en[key] || key; }
@@ -990,15 +998,15 @@ function render(){
       ${ui.searchOpen ? '' : renderSummaryRow(t)}
     </div>
     <nav class="tab-rail">
-      <div class="tab-chip dashboard ${ui.activeTab==='dashboard'?'active':''}" onclick="setTab('dashboard')">📊 Dashboard</div>
+      <div class="tab-chip dashboard ${ui.activeTab==='dashboard'?'active':''}" onclick="setTab('dashboard')">📊 ${T('dashboard')}</div>
       <div class="tab-chip dashboard" style="background:var(--gold); color:#2A2110; ${ui.activeTab==='accounts'?'':'opacity:0.62; transform:translateY(4px) scale(0.96);'}" onclick="setTab('accounts')">💰 Accounts</div>
       ${state.groups.map(g=>`
         <div class="tab-chip ${ui.activeTab===g.id?'active':''}" style="background:${g.color}" onclick="setTab('${g.id}')">${escapeHtml(g.name)}</div>
       `).join('')}
-      <div class="tab-chip addnew" onclick="openAddGroup()">+ Tab</div>
+      <div class="tab-chip addnew" onclick="openAddGroup()">${T('addTab')}</div>
     </nav>
     <main id="mainContent">${ui.activeTab==='dashboard' ? renderDashboard(t) : ui.activeTab==='accounts' ? renderAccounts() : renderGroupView(ui.activeTab)}</main>
-    <button class="fab" onclick="onFab()">${ui.activeTab==='dashboard' ? '➕ New Collection Tab' : ui.activeTab==='accounts' ? '➕ Add Entry' : '➕ Add Customer'}</button>
+    <button class="fab" onclick="onFab()">${ui.activeTab==='dashboard' ? '➕ '+T('newColTab') : ui.activeTab==='accounts' ? '➕ '+T('addEntry') : '➕ '+T('addCustomer')}</button>
   `;
   renderModal();
 }
@@ -1006,10 +1014,10 @@ function render(){
 function renderSummaryRow(t){
   return `
     <div class="summary-row">
-      <div class="stat"><div class="v mono">${state.customers.length}</div><div class="l">Customers</div></div>
-      <div class="stat"><div class="v mono">${fmtINR(t.outstanding)}</div><div class="l">Outstanding</div></div>
-      <div class="stat warn"><div class="v mono">${fmtINR(t.dueToday)}</div><div class="l">Due Today</div></div>
-      <div class="stat danger"><div class="v mono">${fmtINR(t.overdue)}</div><div class="l">Overdue</div></div>
+      <div class="stat"><div class="v mono">${state.customers.length}</div><div class="l">${T('customers')}</div></div>
+      <div class="stat"><div class="v mono">${fmtINR(t.outstanding)}</div><div class="l">${T('outstanding')}</div></div>
+      <div class="stat warn"><div class="v mono">${fmtINR(t.dueToday)}</div><div class="l">${T('dueToday')}</div></div>
+      <div class="stat danger"><div class="v mono">${fmtINR(t.overdue)}</div><div class="l">${T('overdue')}</div></div>
     </div>`;
 }
 
@@ -1047,26 +1055,26 @@ function renderDashboard(t){
     <div class="dash-stat-card" style="border-color:var(--navy);">
       <div class="ds-icon">👥</div>
       <div class="ds-val">${state.customers.length}</div>
-      <div class="ds-lbl">Total Customers</div>
+      <div class="ds-lbl">${T('totalCustomers')}</div>
     </div>
     <div class="dash-stat-card" style="border-color:var(--green);">
       <div class="ds-icon">📋</div>
       <div class="ds-val">${state.loans.length}</div>
-      <div class="ds-lbl">Total Loans</div>
+      <div class="ds-lbl">${T('totalLoans')}</div>
     </div>
     <div class="dash-stat-card" style="border-color:var(--amber);">
       <div class="ds-icon">💰</div>
       <div class="ds-val mono">${fmtINR(t.outstanding)}</div>
-      <div class="ds-lbl">Total Outstanding</div>
+      <div class="ds-lbl">${T('totalOutstanding')}</div>
     </div>
     <div class="dash-stat-card" style="border-color:var(--maroon);">
       <div class="ds-icon">⚠️</div>
       <div class="ds-val mono" style="color:var(--maroon);">${fmtINR(t.overdue)}</div>
-      <div class="ds-lbl">Total Overdue</div>
+      <div class="ds-lbl">${T('totalOverdue')}</div>
     </div>
   </div>
   <div class="cash-hero" onclick="setTab('accounts')" style="cursor:pointer; margin-bottom:12px;">
-    <div class="lbl">Cash in Hand</div>
+    <div class="lbl">${T('cashInHand')}</div>
     <div class="amt">${fmtINR(cashInHand())}</div>
     <div class="lbl" style="font-size:10px; opacity:0.7;">tap for full breakdown →</div>
   </div>`;
@@ -1077,28 +1085,28 @@ function renderDashboard(t){
     <div class="dash-stat-card" style="border-color:var(--navy);">
       <div class="ds-icon">📤</div>
       <div class="ds-val mono">${fmtINR(td.loansGivenAmt)}</div>
-      <div class="ds-lbl">Loans Given (${td.loansGiven.length})</div>
+      <div class="ds-lbl">${T('loansGiven')} (${td.loansGiven.length})</div>
     </div>
     <div class="dash-stat-card" style="border-color:var(--green);">
       <div class="ds-icon">📥</div>
       <div class="ds-val mono" style="color:var(--green);">${fmtINR(td.collectedAmt)}</div>
-      <div class="ds-lbl">Collected (${td.collectedItems.length})</div>
+      <div class="ds-lbl">${T('collected')} (${td.collectedItems.length})</div>
     </div>
     <div class="dash-stat-card" style="border-color:var(--maroon);">
       <div class="ds-icon">🔴</div>
       <div class="ds-val mono" style="color:var(--maroon);">${fmtINR(td.unpaidAmt)}</div>
-      <div class="ds-lbl">Unpaid Today (${td.unpaidItems.length})</div>
+      <div class="ds-lbl">${T('unpaid')} (${td.unpaidItems.length})</div>
     </div>
     <div class="dash-stat-card" style="border-color:var(--gold);">
       <div class="ds-icon">💹</div>
       <div class="ds-val mono" style="color:var(--amber);">${fmtINR(td.profitAmt)}</div>
-      <div class="ds-lbl">Today's Profit</div>
+      <div class="ds-lbl">${T('profit')}</div>
     </div>
   </div>`;
 
   /* Today detail cards */
   if(td.loansGiven.length){
-    html += `<div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--ink-soft); margin-bottom:6px;">📤 Loans Given Today</div>`;
+    html += `<div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--ink-soft); margin-bottom:6px;">📤 ${T('loansGiven')}</div>`;
     td.loansGiven.forEach(l=>{
       const c=getCustomer(l.customerId); const g=c?getGroup(c.groupId):null;
       html += `<div class="detail-row"><span class="tag-dot" style="background:${g?g.color:'#999'}"></span><span class="dr-name">${c?escapeHtml(c.name):'?'}</span><span class="dr-sub">${l.numEmis}×${l.frequency} @ ${l.rate}%</span><span class="dr-amt navy">${fmtINR(l.principal)}</span></div>`;
@@ -1112,7 +1120,7 @@ function renderDashboard(t){
     });
   }
   if(td.unpaidItems.length){
-    html += `<div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--maroon); margin:10px 0 6px;">🔴 Unpaid Today</div>`;
+    html += `<div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--maroon); margin:10px 0 6px;">🔴 ${T('unpaid')}</div>`;
     td.unpaidItems.forEach(({l,c,s})=>{
       const g=c?getGroup(c.groupId):null;
       html += `<div class="detail-row" onclick="jumpToCustomer('${c?c.id:''}')" style="cursor:pointer;"><span class="tag-dot" style="background:${g?g.color:'#999'}"></span><span class="dr-name">${c?escapeHtml(c.name):'?'}</span><span class="dr-sub">${c?escapeHtml(c.mobile||''):''}  </span><span class="dr-amt red">${fmtINR(s.dueToday)}</span></div>`;
@@ -1120,7 +1128,7 @@ function renderDashboard(t){
   }
 
   /* ---- Today export button ---- */
-  html += `<button class="btn btn-ghost btn-block" style="margin:10px 0 4px; border:1.5px solid var(--navy); color:var(--navy);" onclick="exportExcel('today_report')">⬇️ Export Today's Report (.xlsx)</button>`;
+  html += `<button class="btn btn-ghost btn-block" style="margin:10px 0 4px; border:1.5px solid var(--navy); color:var(--navy);" onclick="exportExcel('today_report')">⬇️ ${T('exportXlsx')}</button>`;
 
   /* ---- Monthly Overview ---- */
   html += `<div class="section-title" style="margin-top:18px;">📆 ${monthLabel2} — Monthly Overview</div>
@@ -1133,7 +1141,7 @@ function renderDashboard(t){
     <div class="dash-stat-card" style="border-color:var(--green);">
       <div class="ds-icon">📥</div>
       <div class="ds-val mono" style="color:var(--green);">${fmtINR(mn.collectedAmt)}</div>
-      <div class="ds-lbl">Total Collected</div>
+      <div class="ds-lbl">${T('collected')}</div>
     </div>
     <div class="dash-stat-card" style="border-color:var(--maroon);">
       <div class="ds-icon">🧾</div>
@@ -1205,18 +1213,21 @@ function renderGroupView(groupId){
   const g = getGroup(groupId);
   if(!g){ ui.activeTab='dashboard'; return renderDashboard(allTotals()); }
   const allCusts = groupCustomers(groupId);
-  let html = `<div class="section-title">${escapeHtml(g.name)} — ${allCusts.length} customer${allCusts.length!==1?'s':''}
-    <span style="float:right; cursor:pointer; color:var(--maroon);" onclick="confirmDeleteGroup('${g.id}')">🗑 tab</span></div>`;
+  let html = `<div class="section-title" style="display:flex;align-items:center;gap:6px;">
+    <span style="flex:1;">${escapeHtml(g.name)} — ${allCusts.length} ${T('customers')}</span>
+    <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:11px;" onclick="openEditGroup('${g.id}')">✏️</button>
+    <button class="btn btn-sm" style="padding:3px 8px;font-size:11px;background:var(--maroon);color:#fff;border:none;" onclick="confirmDeleteGroup('${g.id}')">🗑</button>
+  </div>`;
   if(!allCusts.length){
-    html += `<div class="empty"><div class="big">🧾</div><p>No customers in this tab yet.<br>Tap "Add Customer" below to start collecting here.</p></div>`;
+    html += `<div class="empty"><div class="big">🧾</div><p>${T('noCustomers')}<br>${T('createTab')}</p></div>`;
     return html;
   }
   const activeCount = allCusts.filter(c=>customerActive(c.id)).length;
   const inactiveCount = allCusts.length - activeCount;
   html += `<div style="display:flex; gap:6px; margin-bottom:12px;">
-    <div class="seg-btn" style="flex:none; padding:6px 12px; ${ui.custFilter==='all'?'background:var(--navy); color:#fff; border-color:var(--navy);':''}" onclick="setCustFilter('all')">All (${allCusts.length})</div>
-    <div class="seg-btn" style="flex:none; padding:6px 12px; ${ui.custFilter==='active'?'background:var(--green); color:#fff; border-color:var(--green);':''}" onclick="setCustFilter('active')">Active (${activeCount})</div>
-    <div class="seg-btn" style="flex:none; padding:6px 12px; ${ui.custFilter==='inactive'?'background:#888; color:#fff; border-color:#888;':''}" onclick="setCustFilter('inactive')">Inactive (${inactiveCount})</div>
+    <div class="seg-btn" style="flex:none; padding:6px 12px; ${ui.custFilter==='all'?'background:var(--navy); color:#fff; border-color:var(--navy);':''}" onclick="setCustFilter('all')">${T('all')} (${allCusts.length})</div>
+    <div class="seg-btn" style="flex:none; padding:6px 12px; ${ui.custFilter==='active'?'background:var(--green); color:#fff; border-color:var(--green);':''}" onclick="setCustFilter('active')">${T('active')} (${activeCount})</div>
+    <div class="seg-btn" style="flex:none; padding:6px 12px; ${ui.custFilter==='inactive'?'background:#888; color:#fff; border-color:#888;':''}" onclick="setCustFilter('inactive')">${T('inactive')} (${inactiveCount})</div>
   </div>`;
   let custs = allCusts;
   if(ui.custFilter==='active') custs = allCusts.filter(c=>customerActive(c.id));
@@ -1234,7 +1245,7 @@ function renderAccounts(){
   const lc = loanCashTotals();
   const cash = cashInHand();
   let html = `<div class="cash-hero">
-    <div class="lbl">Cash in Hand</div>
+    <div class="lbl">${T('cashInHand')}</div>
     <div class="amt">${fmtINR(cash)}</div>
     <div class="cash-breakdown">
       <span class="cash-chip pos">+ ${fmtINR(tx.invested)} invested</span>
@@ -1245,7 +1256,7 @@ function renderAccounts(){
     </div>
   </div>
 
-  <div class="section-title" style="margin-top:0;">📊 Export Reports</div>
+  <div class="section-title" style="margin-top:0;">${T('exportReports')}</div>
 
   <!-- Date selectors -->
   <div style="background:var(--card); border-radius:var(--radius); padding:13px 14px; margin-bottom:12px; box-shadow:var(--shadow);">
@@ -1303,9 +1314,9 @@ function renderAccounts(){
   </div>`;
 
   const list = [...state.transactions].sort((a,b)=> b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
-  html += `<div class="section-title">Recent Entries</div>`;
+  html += `<div class="section-title">${T('recentEntries')}</div>`;
   if(!list.length){
-    html += `<div class="empty"><div class="big">💰</div><p>No investments, withdrawals or expenses recorded yet.<br>Use the buttons above to log your first entry.</p></div>`;
+    html += `<div class="empty"><div class="big">💰</div><p>${T('noEntries')}</p></div>`;
   } else {
     html += list.map(t=>transactionRow(t)).join('');
   }
@@ -1344,10 +1355,10 @@ function renderCustomerCard(c){
       🤝 Referred by <b>${referrer?escapeHtml(referrer.name):'—'}</b>
     </div>
     <div class="cust-actions" style="flex-wrap:wrap;">
-      <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); openAddLoan('${c.id}')">➕ New Loan</button>
-      <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); openEditCustomer('${c.id}')">✏️ Edit</button>
+      <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); openAddLoan('${c.id}')">${T('newLoan')}</button>
+      <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); openEditCustomer('${c.id}')">${T('edit')}</button>
       <button class="btn btn-sm" style="background:${isActive?'var(--green-light)':'var(--surface2)'}; color:${isActive?'var(--green)':'var(--ink-soft)'}; border:1.5px solid ${isActive?'var(--green)':'var(--border)'};" onclick="event.stopPropagation(); toggleCustomerStatus('${c.id}')">${isActive?T('active'):T('inactive')}</button>
-      <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); confirmDeleteCustomer('${c.id}')">🗑 Delete</button>
+      <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); confirmDeleteCustomer('${c.id}')">${T('delete')}</button>
     </div>`;
 
   if(!loans.length){
@@ -1394,13 +1405,13 @@ function renderLoanCard(l){
     <div class="loan-progress"><div style="width:${pct}%; background:${s.overdue>0?'var(--maroon)':s.completed?'var(--green)':'var(--navy)'}"></div></div>
     <div class="loan-next" style="font-size:11.5px; color:var(--ink-soft); margin-bottom:8px;">
       ${s.completed
-        ? '✓ Loan fully repaid'
-        : `Next due: <b class="mono">${fmtINR(s.next.amount)}</b> on ${fmtDate(s.next.dueDate)}`
+        ? T('fullyRepaid')
+        : `${T('nextDue')}: <b class="mono">${fmtINR(s.next.amount)}</b> on ${fmtDate(s.next.dueDate)}`
       }
     </div>
     ${!s.completed ? `<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-      <button class="btn btn-primary btn-sm" style="justify-content:center; background:var(--green);" onclick="event.stopPropagation(); markPaid('${l.id}')">✓ Mark EMI Paid<br><span style="font-size:10px; font-weight:400; opacity:0.85;">${fmtINR(s.next.amount)}</span></button>
-      <button class="btn btn-ghost btn-sm" style="justify-content:center; border:1.5px solid var(--rule);" onclick="event.stopPropagation(); openCustomCollect('${l.id}')">₹ Custom Amount<br><span style="font-size:10px; font-weight:400; color:var(--ink-soft);">enter any amount</span></button>
+      <button class="btn btn-primary btn-sm" style="justify-content:center; background:var(--green);" onclick="event.stopPropagation(); markPaid('${l.id}')">${T('markPaid')}<br><span style="font-size:10px; font-weight:400; opacity:0.85;">${fmtINR(s.next.amount)}</span></button>
+      <button class="btn btn-ghost btn-sm" style="justify-content:center; border:1.5px solid var(--rule);" onclick="event.stopPropagation(); openCustomCollect('${l.id}')">${T('customAmt')}<br><span style="font-size:10px; font-weight:400; color:var(--ink-soft);">enter any amount</span></button>
     </div>` : ''}
     <button class="btn btn-ghost btn-sm btn-block" style="margin-top:8px;" onclick="event.stopPropagation(); openLoanHistory('${l.id}')">${T('viewHistory')}</button>
     <button class="btn btn-ghost btn-sm btn-block" style="margin-top:6px; color:var(--amber);" onclick="event.stopPropagation(); openEditLoan('${l.id}')">${T('editLoan')}</button>
@@ -1451,14 +1462,14 @@ function modalBody(){
 function groupForm(existing){
   const colorSel = existing ? existing.color : COLORS[state.groups.length % COLORS.length];
   return `<div class="sheet-handle"></div>
-    <h2>${existing?'Edit Tab':'New Collection Tab'}</h2>
-    <div class="field"><label>Tab name</label><input id="f_groupName" placeholder="e.g. Monday Evening Finance" value="${existing?escapeAttr(existing.name):''}"></div>
-    <div class="field"><label>Color</label><div class="swatches" id="swatchRow">
+    <h2>${existing?T('editTab'):T('newTab')}</h2>
+    <div class="field"><label>${T('tabName')}</label><input id="f_groupName" placeholder="e.g. Monday Evening Finance" value="${existing?escapeAttr(existing.name):''}"></div>
+    <div class="field"><label>${T('color')}</label><div class="swatches" id="swatchRow">
       ${COLORS.map(c=>`<div class="swatch ${c===colorSel?'sel':''}" style="background:${c}" data-c="${c}" onclick="pickSwatch(this)"></div>`).join('')}
     </div></div>
     <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveGroup('${existing?existing.id:''}')">Save Tab</button>
+      <button class="btn btn-ghost" onclick="closeModal()">${T('cancel')}</button>
+      <button class="btn btn-primary" onclick="saveGroup('${existing?existing.id:''}')">${T('saveTab')}</button>
     </div>`;
 }
 function pickSwatch(el){
@@ -1480,7 +1491,7 @@ async function saveGroup(existingId){
   }
   await saveData();
   closeModal();
-  showToast('Tab saved');
+  showToast(T('tabSaved'));
 }
 
 function suggestCode(groupId){
@@ -1493,25 +1504,25 @@ function customerForm(existing, groupId){
   const gid = existing ? existing.groupId : groupId;
   const others = state.customers.filter(c=>!existing || c.id!==existing.id);
   return `<div class="sheet-handle"></div>
-    <h2>${existing?'Edit Customer':'Add Customer'}</h2>
-    <div class="field"><label>Customer name</label><input id="f_custName" value="${existing?escapeAttr(existing.name):''}" placeholder="Full name"></div>
+    <h2>${existing?T('editCust'):T('addCust')}</h2>
+    <div class="field"><label>${T('custName')}</label><input id="f_custName" value="${existing?escapeAttr(existing.name):''}" placeholder="Full name"></div>
     <div class="row2">
-      <div class="field"><label>Customer code</label><input id="f_custCode" value="${existing?escapeAttr(existing.code):suggestCode(gid)}"></div>
-      <div class="field"><label>Mobile number</label><input id="f_custMobile" value="${existing?escapeAttr(existing.mobile):''}" placeholder="10-digit" inputmode="numeric"></div>
+      <div class="field"><label>${T('custCode')}</label><input id="f_custCode"" value="${existing?escapeAttr(existing.code):suggestCode(gid)}"></div>
+      <div class="field"><label>${T('custMobile')}</label><input id="f_custMobile" value="${existing?escapeAttr(existing.mobile):''}" placeholder="10-digit" inputmode="numeric"></div>
     </div>
     <div class="row2">
-      <div class="field"><label>Area</label><input id="f_custArea" value="${existing?escapeAttr(existing.area):''}" placeholder="e.g. Periyar Nagar"></div>
-      <div class="field"><label>Join date</label><input id="f_custJoin" type="date" value="${existing?existing.joinDate:todayISO()}"></div>
+      <div class="field"><label>${T('custArea')}</label><input id="f_custArea" value="${existing?escapeAttr(existing.area):''}" placeholder="e.g. Periyar Nagar"></div>
+      <div class="field"><label>${T('custJoin')}</label><input id="f_custJoin" type="date" value="${existing?existing.joinDate:todayISO()}"></div>
     </div>
-    <div class="field"><label>Referred by</label>
+    <div class="field"><label>${T('referral')}</label>
       <select id="f_custReferral">
-        <option value="">— No referral / walk-in —</option>
+        <option value="">${T('noReferral')}</option>
         ${others.map(o=>`<option value="${o.id}" ${existing&&existing.referral===o.id?'selected':''}>${escapeHtml(o.name)} (${escapeHtml(o.code)})</option>`).join('')}
       </select>
     </div>
     <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveCustomer('${existing?existing.id:''}','${gid}')">Save Customer</button>
+      <button class="btn btn-ghost" onclick="closeModal()">${T('cancel')}</button>
+      <button class="btn btn-primary" onclick="saveCustomer('${existing?existing.id:''}','${gid}')">${T('saveCust')}</button>
     </div>`;
 }
 async function saveCustomer(existingId, groupId){
@@ -1531,32 +1542,32 @@ async function saveCustomer(existingId, groupId){
   }
   await saveData();
   closeModal();
-  showToast('Customer saved');
+  showToast(T('custSaved')||'Customer saved');
 }
 
 function loanForm(customerId){
   const c = getCustomer(customerId);
   return `<div class="sheet-handle"></div>
-    <h2>New Loan — ${escapeHtml(c.name)}</h2>
+    <h2>${T('addLoan')} — ${escapeHtml(c.name)}</h2>
     <div class="row2">
-      <div class="field"><label>Principal (₹)</label><input id="f_loanPrincipal" type="number" placeholder="10000" oninput="updateLoanPreview()"></div>
-      <div class="field"><label>Interest rate (%)</label><input id="f_loanRate" type="number" placeholder="20" oninput="updateLoanPreview()"></div>
+      <div class="field"><label>${T('principal')}</label><input id="f_loanPrincipal" type="number" placeholder="10000" oninput="updateLoanPreview()"></div>
+      <div class="field"><label>${T('rate')}</label><input id="f_loanRate" type="number" placeholder="20" oninput="updateLoanPreview()"></div>
     </div>
     <div class="row2">
-      <div class="field"><label>Number of EMIs</label><input id="f_loanEmis" type="number" placeholder="10" oninput="updateLoanPreview()"></div>
-      <div class="field"><label>Frequency</label>
+      <div class="field"><label>${T('numEmis')}</label><input id="f_loanEmis" type="number" placeholder="10" oninput="updateLoanPreview()"></div>
+      <div class="field"><label>${T('frequency')}</label>
         <select id="f_loanFreq" onchange="updateLoanPreview()">
-          <option value="weekly">Weekly</option>
-          <option value="daily">Daily</option>
-          <option value="monthly">Monthly</option>
+          <option value="weekly">${T('weekly')}</option>
+          <option value="daily">${T('daily')}</option>
+          <option value="monthly">${T('monthly2')}</option>
         </select>
       </div>
     </div>
-    <div class="field"><label>Start date</label><input id="f_loanStart" type="date" value="${todayISO()}" oninput="updateLoanPreview()"></div>
+    <div class="field"><label>${T('startDate')}</label><input id="f_loanStart" type="date" value="${todayISO()}" oninput="updateLoanPreview()"></div>
     <div class="preview-box" id="loanPreview">Enter loan details to see the EMI breakdown.</div>
     <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveLoan('${customerId}')">Create Loan</button>
+      <button class="btn btn-ghost" onclick="closeModal()">${T('cancel')}</button>
+      <button class="btn btn-primary" onclick="saveLoan('${customerId}')">${T('createLoan')}</button>
     </div>`;
 }
 function readLoanInputs(){
@@ -1588,7 +1599,7 @@ async function saveLoan(customerId){
   state.loans.push({id:uid('ln'), customerId, principal, rate, numEmis, frequency:freq, startDate:start, payments, createdAt:todayISO()});
   await saveData();
   closeModal();
-  showToast('Loan created');
+  showToast(T('loanCreated')||'Loan created');
 }
 
 const EXPENSE_CATEGORIES = ['Travel','Staff / Salary','Office / Rent','Stationery','Phone / Recharge','Food','Maintenance','Other'];
@@ -1609,12 +1620,12 @@ function transactionForm(type){
     </div>
     <div class="row2">
       <div class="field"><label>Amount (₹)</label><input id="f_txAmount" type="number" placeholder="5000"></div>
-      <div class="field"><label>Date</label><input id="f_txDate" type="date" value="${todayISO()}"></div>
+      <div class="field"><label>${T('date')}</label><input id="f_txDate" type="date" value="${todayISO()}"></div>
     </div>
     ${isExpense ? `<div class="field"><label>Category</label>
       <select id="f_txCategory">${EXPENSE_CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('')}</select>
     </div>` : ''}
-    <div class="field"><label>Note (optional)</label><input id="f_txNote" placeholder="${isExpense?'e.g. Bike fuel':'e.g. From savings account'}"></div>
+    <div class="field"><label>${T('note')}</label><input id="f_txNote" placeholder="${isExpense?'e.g. Bike fuel':'e.g. From savings account'}"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
       <button class="btn btn-primary" onclick="saveTransaction('${type}')">Save ${TX_LABELS[type]}</button>
@@ -1802,6 +1813,7 @@ function onFab(){
   else { openAddCustomer(ui.activeTab); }
 }
 function openAddGroup(){ ui.modal={type:'addGroup'}; render(); }
+function openEditGroup(id){ ui.modal={type:'editGroupColor', payload:getGroup(id)}; render(); }
 function openAddCustomer(groupId){ ui.modal={type:'addCustomer', payload:{groupId}}; render(); }
 function openEditCustomer(custId){ ui.modal={type:'editCustomer', payload:getCustomer(custId)}; render(); }
 function openAddLoan(custId){ ui.modal={type:'addLoan', payload:{customerId:custId}}; render(); }
@@ -1823,16 +1835,16 @@ function customCollectForm(loanId){
   const l = state.loans.find(x=>x.id===loanId);
   const s = loanStatus(l);
   return `<div class="sheet-handle"></div>
-    <h2>Custom Amount Collected</h2>
+    <h2>${T('customCollectTitle')}</h2>
     <div class="preview-box">Standard next due: <b>${s.next?fmtINR(s.next.amount):'—'}</b>${s.next?' on '+fmtDate(s.next.dueDate):''}<br>Outstanding balance: <b>${fmtINR(s.outstanding)}</b></div>
     <div class="row2">
-      <div class="field"><label>Amount Collected (₹)</label><input id="f_collectAmount" type="number" placeholder="${s.next?s.next.amount:''}"></div>
-      <div class="field"><label>Date</label><input id="f_collectDate" type="date" value="${todayISO()}"></div>
+      <div class="field"><label>${T('amtCollected')}</label><input id="f_collectAmount" type="number" placeholder="${s.next?s.next.amount:''}"></div>
+      <div class="field"><label>${T('date')}</label><input id="f_collectDate" type="date" value="${todayISO()}"></div>
     </div>
-    <div class="field"><label>Note (optional)</label><input id="f_collectNote" placeholder="e.g. Partial payment"></div>
+    <div class="field"><label>${T('note')}</label><input id="f_collectNote" placeholder="e.g. Partial payment"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveCustomCollect('${loanId}')">Save Payment</button>
+      <button class="btn btn-primary" onclick="saveCustomCollect('${loanId}')">${T('savePayment')}</button>
     </div>`;
 }
 async function saveCustomCollect(loanId){
@@ -1992,7 +2004,7 @@ function loanHistoryModal(loanId){
   const colLog = [...(l.collections||[])].sort((a,b)=>b.date.localeCompare(a.date));
 
   return `<div class="sheet-handle"></div>
-    <h2 style="margin-bottom:4px;">EMI History</h2>
+    <h2 style="margin-bottom:4px;">${T('emiHistory')}</h2>
     <div style="font-size:12px; color:var(--ink-soft); margin-bottom:12px;">${escapeHtml(c?c.name:'Unknown')} · ${fmtINR(l.principal)} @ ${l.rate}% · ${l.numEmis} ${l.frequency} EMIs</div>
     <div class="preview-box" style="margin-bottom:12px;">
       Total payable: <b>${fmtINR(s.totalPayable)}</b> &nbsp;|&nbsp;
@@ -2000,7 +2012,7 @@ function loanHistoryModal(loanId){
       Outstanding: <b>${fmtINR(s.outstanding)}</b>
     </div>
 
-    <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink-soft); margin-bottom:6px;">EMI Schedule</div>
+    <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink-soft); margin-bottom:6px;">${T('emiSchedule')}</div>
     <div style="overflow-x:auto; margin-bottom:16px;">
       <table class="emi-table">
         <thead><tr><th>#</th><th>Due Date</th><th>EMI Amount</th><th>Status</th></tr></thead>
@@ -2008,8 +2020,8 @@ function loanHistoryModal(loanId){
       </table>
     </div>
 
-    <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink-soft); margin-bottom:6px;">Payment Collections (${colLog.length})</div>
-    ${colLog.length === 0 ? `<div style="font-size:12px; color:var(--ink-soft); padding:8px 0;">No payments recorded yet.</div>` :
+    <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink-soft); margin-bottom:6px;">${T('paymentCollections')} (${colLog.length})</div>
+    ${colLog.length === 0 ? `<div style="font-size:12px; color:var(--ink-soft); padding:8px 0;">${T('noData')}</div>` :
       `<div style="overflow-x:auto; margin-bottom:16px;">
         <table class="emi-table">
           <thead><tr><th>Date</th><th>Amount</th><th>Note</th></tr></thead>
@@ -2019,8 +2031,8 @@ function loanHistoryModal(loanId){
     }
 
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
-      <button class="btn btn-ghost btn-sm" onclick="exportLoanStatement('${loanId}')">⬇️ Export .xlsx</button>
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>
+      <button class="btn btn-ghost btn-sm" onclick="exportLoanStatement('${loanId}')">⬇️ ${T('exportXlsx').replace('⬇️ ','').replace(' (.xlsx)','')}</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">${T('close')}</button>
     </div>`;
 }
 
@@ -2127,7 +2139,7 @@ function exportExcel(type){
         'Referred By': referrer?referrer.name:'',
         'Total Loans': loans.length,
         'Total Lent (₹)': totalLent,
-        'Total Collected (₹)': totalCollected,
+        '${T('collected')} (₹)': totalCollected,
         'Outstanding (₹)': Math.round(outstanding),
         'Status': customerActive(c.id)?'Active':'Inactive'
       };
@@ -2210,14 +2222,14 @@ function exportExcel(type){
       {'Item':'Date','Value':fmtDate(today)},
       {'Item':'Loans Given (count)','Value':td.loansGiven.length},
       {'Item':'Loans Given Amount (₹)','Value':td.loansGivenAmt},
-      {'Item':'Total Collected (₹)','Value':Math.round(td.collectedAmt)},
+      {'Item':'${T('collected')} (₹)','Value':Math.round(td.collectedAmt)},
       {'Item':'Collections Count','Value':td.collectedItems.length},
       {'Item':'Unpaid Today (₹)','Value':Math.round(td.unpaidAmt)},
       {'Item':'Unpaid Customers','Value':td.unpaidItems.length},
-      {'Item':"Today's Profit (₹)",'Value':Math.round(td.profitAmt)},
+      {'Item':"${T('profit')} (₹)",'Value':Math.round(td.profitAmt)},
     ];
     const ws_sum=XLSX.utils.json_to_sheet(summaryRows); autoWidth(ws_sum,summaryRows); XLSX.utils.book_append_sheet(wb,ws_sum,'Summary');
-    if(givenRows.length){ const ws=XLSX.utils.json_to_sheet(givenRows); autoWidth(ws,givenRows); XLSX.utils.book_append_sheet(wb,ws,'Loans Given Today'); }
+    if(givenRows.length){ const ws=XLSX.utils.json_to_sheet(givenRows); autoWidth(ws,givenRows); XLSX.utils.book_append_sheet(wb,ws,'${T('loansGiven')}'); }
     if(colRows.length){ const ws=XLSX.utils.json_to_sheet(colRows); autoWidth(ws,colRows); XLSX.utils.book_append_sheet(wb,ws,'Collections Today'); }
     if(unpaidRows.length){ const ws=XLSX.utils.json_to_sheet(unpaidRows); autoWidth(ws,unpaidRows); XLSX.utils.book_append_sheet(wb,ws,'Unpaid Today'); }
     XLSX.writeFile(wb, `Today_Report_${today}.xlsx`);
@@ -2233,7 +2245,7 @@ function exportExcel(type){
     const bsRows = [
       {'Category':'INCOME','Item':'Interest Earned (₹)','Amount':Math.round(mn.profitAmt)},
       {'Category':'INCOME','Item':'Principal Collected (₹)','Amount':Math.round(mn.collectedAmt - mn.profitAmt)},
-      {'Category':'INCOME','Item':'Total Collected (₹)','Amount':Math.round(mn.collectedAmt)},
+      {'Category':'INCOME','Item':'${T('collected')} (₹)','Amount':Math.round(mn.collectedAmt)},
       {'Category':'INCOME','Item':'New Investments Received (₹)','Amount':Math.round(mn.monthInvested)},
       {'Category':''},
       {'Category':'EXPENDITURE','Item':'Loans Disbursed (₹)','Amount':mn.loansGivenAmt},
@@ -2402,7 +2414,7 @@ function exportByDate(groupId, period){
   const summaryRows = [
     { 'Item': 'Line / Tab',                   'Value': tabLabel },
     { 'Item': 'Report Period',                 'Value': periodName },
-    { 'Item': 'Total Collected (₹)',           'Value': Math.round(totalCollected) },
+    { 'Item': '${T('collected')} (₹)',           'Value': Math.round(totalCollected) },
     { 'Item': 'No. of Collections',           'Value': colRows.length },
     { 'Item': 'Profit / Interest Earned (₹)', 'Value': Math.round(totalProfit) },
     { 'Item': 'Unpaid / Overdue EMIs (₹)',    'Value': Math.round(totalUnpaid) },
