@@ -368,16 +368,14 @@ const auth = getAuth(app);
 const db   = getFirestore(app);
 
 // Force IndexedDB persistence — works on mobile Chrome without third-party cookies
-// try/catch so a failure (e.g. private browsing) doesn't crash the auth module
-try {
-  await setPersistence(auth, indexedDBLocalPersistence);
-} catch(e) {
-  console.warn('IndexedDB persistence unavailable:', e.message);
-}
+try { await setPersistence(auth, indexedDBLocalPersistence); } catch(e) { console.warn('persistence fallback:', e.message); }
+
+// Module-level user reference — always up to date
+let _activeUser = null;
 
 // Load data from Firestore
 window._apiLoad = async function(){
-  const user = auth.currentUser;
+  const user = _activeUser || auth.currentUser;
   if(!user) throw new Error('Not logged in');
   const snap = await getDoc(doc(db, 'ledgers', user.uid));
   if(!snap.exists()) return null;
@@ -387,7 +385,7 @@ window._apiLoad = async function(){
 
 // Save data to Firestore — store as plain string to avoid nested object issues
 window._apiSave = async function(jsonStr){
-  const user = auth.currentUser;
+  const user = _activeUser || auth.currentUser;
   if(!user) throw new Error('Not logged in');
   await setDoc(doc(db, 'ledgers', user.uid), {
     data: jsonStr,
@@ -488,11 +486,13 @@ window._doSignup = async function(){
 
 // Listen for auth state — fires on login, signup, and page reload (stays logged in)
 onAuthStateChanged(auth, user => {
+  _activeUser = user; // keep module-level reference so _apiLoad/_apiSave always have the user
   if(user){
     document.getElementById('authOverlay')?.remove();
     window._fbReady = true;
     window._startApp();
   } else {
+    _activeUser = null;
     showAuthUI();
   }
 });
@@ -544,24 +544,16 @@ function setSyncDot(status){ // 'syncing', 'ok', 'error'
 async function loadData(){
   try{
     let raw = null;
-    // Always fetch from Firestore when Firebase is ready — never use localStorage as primary source.
-    // localStorage is only a fallback if Firestore throws (e.g. offline).
     if(window._fbReady){
       setSyncDot('syncing');
       try{
         raw = await window._apiLoad();
         setSyncDot('ok');
-        // Keep localStorage in sync for offline fallback
         if(raw) localStorage.setItem(LS_KEY, raw);
         else {
-          // Firestore returned nothing (first ever login on this account)
-          // Try localStorage in case there's local data to migrate up
+          // Nothing in Firestore yet — push local data up if any
           raw = localStorage.getItem(LS_KEY);
-          if(raw){
-            // Push local data up to Firestore so it syncs everywhere
-            await window._apiSave(raw);
-            setSyncDot('ok');
-          }
+          if(raw){ await window._apiSave(raw); setSyncDot('ok'); }
         }
       } catch(e){
         console.warn('Firestore load failed, using local cache:', e.message);
@@ -569,7 +561,6 @@ async function loadData(){
         setSyncDot('error');
       }
     } else {
-      // Firebase not ready (e.g. not logged in yet) — use local cache
       raw = localStorage.getItem(LS_KEY);
     }
     if(raw) state = JSON.parse(raw);
