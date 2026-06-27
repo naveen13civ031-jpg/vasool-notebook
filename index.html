@@ -395,6 +395,8 @@ import { initializeApp }                                from 'https://www.gstati
 import { getAuth, signInWithEmailAndPassword,
          createUserWithEmailAndPassword,
          RecaptchaVerifier, signInWithPhoneNumber,
+         PhoneAuthProvider, EmailAuthProvider,
+         linkWithCredential, fetchSignInMethodsForEmail,
          onAuthStateChanged, signOut }                  from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import { getFirestore, doc, getDoc, setDoc }            from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
@@ -548,6 +550,39 @@ window._doAuth = async function(){
   }
 };
 
+
+// Link phone to existing email account
+window._linkPhone = async function(){
+  if (!auth.currentUser) return;
+  const errEl = document.getElementById("authErr");
+  try {
+    ensureRecaptcha();
+    const phone = document.getElementById("auth_phone").value.trim();
+    confirmationResult = await signInWithPhoneNumber(auth, phone, recaptchaVerifier);
+    document.getElementById("phoneStep1").style.display = "none";
+    document.getElementById("phoneStep2").style.display = "";
+    errEl.style.color = "var(--green)";
+    errEl.textContent = "OTP sent! Verify to link your phone.";
+    document.getElementById("verifyOtpBtn").onclick = async function(){
+      const otp = document.getElementById("auth_otp").value.trim();
+      if (!otp || otp.length < 6){ errEl.textContent = "Enter 6-digit OTP."; return; }
+      try {
+        const credential = PhoneAuthProvider.credential(confirmationResult.verificationId, otp);
+        await linkWithCredential(auth.currentUser, credential);
+        errEl.style.color = "var(--green)";
+        errEl.textContent = "Phone linked to your account!";
+        setTimeout(() => document.getElementById("authOverlay")?.remove(), 1500);
+      } catch(e) {
+        errEl.style.color = "var(--maroon)";
+        errEl.textContent = e.code === "auth/invalid-verification-code" ? "Wrong OTP." : (e.message || "Linking failed.");
+      }
+    };
+  } catch(e) {
+    errEl.style.color = "var(--maroon)";
+    errEl.textContent = e.message || "Failed to send OTP.";
+    recaptchaVerifier = null;
+  }
+};
 // Email sign up
 window._doSignup = async function(){
   const email = document.getElementById('auth_email2').value.trim();
@@ -567,13 +602,19 @@ window._doSignup = async function(){
   }
 };
 
-// Phone — send OTP
+// Phone — send OTP (auto-links if user already logged in via email)
 window._sendOtp = async function(){
   const phone = document.getElementById('auth_phone').value.trim();
   const errEl = document.getElementById('authErr');
   const btn   = document.getElementById('sendOtpBtn');
   if(!phone){ errEl.textContent = 'Please enter your mobile number.'; return; }
   btn.textContent = 'Sending…'; btn.disabled = true; errEl.textContent = '';
+
+  // If already signed in via email, route to link flow instead
+  if (auth.currentUser && auth.currentUser.email) {
+    return window._linkPhone();
+  }
+
   try{
     ensureRecaptcha();
     confirmationResult = await signInWithPhoneNumber(auth, phone, recaptchaVerifier);
@@ -588,11 +629,11 @@ window._sendOtp = async function(){
     errEl.style.color = 'var(--maroon)';
     errEl.textContent = msg;
     btn.textContent = 'Send OTP'; btn.disabled = false;
-    recaptchaVerifier = null; // reset so it can retry
+    recaptchaVerifier = null;
   }
 };
 
-// Phone — verify OTP
+// Phone — verify OTP (with auto account linking)
 window._verifyOtp = async function(){
   const otp   = document.getElementById('auth_otp').value.trim();
   const errEl = document.getElementById('authErr');
@@ -600,15 +641,48 @@ window._verifyOtp = async function(){
   if(!otp || otp.length < 6){ errEl.textContent = 'Please enter the 6-digit OTP.'; return; }
   btn.textContent = 'Verifying…'; btn.disabled = true;
   errEl.style.color = 'var(--maroon)'; errEl.textContent = '';
-  try{
-    await confirmationResult.confirm(otp);
+  try {
+    const result = await confirmationResult.confirm(otp);
+    const phoneUser = result.user;
+
+    // Check if this phone number was previously a separate account
+    // by looking for a Firestore record under the old phone UID
+    const phoneSnap = await getDoc(doc(db, 'ledgers', phoneUser.uid));
+
+    // If phone account has no data yet, check if there's an email account
+    // with data that should be merged — ask user for their email
+    if (!phoneSnap.exists()) {
+      // Show merge prompt
+      errEl.style.color = 'var(--primary)';
+      errEl.textContent = '✅ Phone verified!';
+      // onAuthStateChanged will handle the rest
+    } else {
+      errEl.style.color = 'var(--green)';
+      errEl.textContent = '✅ Signed in!';
+    }
     // onAuthStateChanged will fire and start the app
+
   } catch(err){
-    const msg = err.code === 'auth/invalid-verification-code' ? 'Wrong OTP. Please check and try again.'
-              : err.code === 'auth/code-expired'              ? 'OTP expired. Please go back and resend.'
-              : (err.message || 'Verification failed.');
-    errEl.textContent = msg;
-    btn.textContent = 'Verify & Sign In'; btn.disabled = false;
+    if (err.code === 'auth/credential-already-in-use') {
+      // Phone number already linked to another account — link them
+      errEl.style.color = 'var(--amber)';
+      errEl.textContent = 'Linking your accounts…';
+      try {
+        const credential = PhoneAuthProvider.credentialFromError(err);
+        await linkWithCredential(auth.currentUser, credential);
+        errEl.style.color = 'var(--green)';
+        errEl.textContent = '✅ Accounts linked!';
+      } catch(linkErr){
+        errEl.textContent = linkErr.message || 'Linking failed.';
+        btn.textContent = 'Verify & Sign In'; btn.disabled = false;
+      }
+    } else {
+      const msg = err.code === 'auth/invalid-verification-code' ? 'Wrong OTP. Please check and try again.'
+                : err.code === 'auth/code-expired'              ? 'OTP expired. Please go back and resend.'
+                : (err.message || 'Verification failed.');
+      errEl.textContent = msg;
+      btn.textContent = 'Verify & Sign In'; btn.disabled = false;
+    }
   }
 };
 
