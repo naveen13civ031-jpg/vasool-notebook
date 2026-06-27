@@ -368,11 +368,11 @@ const auth = getAuth(app);
 const db   = getFirestore(app);
 
 // Force IndexedDB persistence — works on mobile Chrome without third-party cookies
-// Wrapped in try/catch so a failure (e.g. private browsing) doesn't crash the auth module
+// try/catch so a failure (e.g. private browsing) doesn't crash the auth module
 try {
   await setPersistence(auth, indexedDBLocalPersistence);
 } catch(e) {
-  console.warn('IndexedDB persistence unavailable, falling back to default:', e.message);
+  console.warn('IndexedDB persistence unavailable:', e.message);
 }
 
 // Load data from Firestore
@@ -544,6 +544,8 @@ function setSyncDot(status){ // 'syncing', 'ok', 'error'
 async function loadData(){
   try{
     let raw = null;
+    // Always fetch from Firestore when Firebase is ready — never use localStorage as primary source.
+    // localStorage is only a fallback if Firestore throws (e.g. offline).
     if(window._fbReady){
       setSyncDot('syncing');
       try{
@@ -551,12 +553,23 @@ async function loadData(){
         setSyncDot('ok');
         // Keep localStorage in sync for offline fallback
         if(raw) localStorage.setItem(LS_KEY, raw);
+        else {
+          // Firestore returned nothing (first ever login on this account)
+          // Try localStorage in case there's local data to migrate up
+          raw = localStorage.getItem(LS_KEY);
+          if(raw){
+            // Push local data up to Firestore so it syncs everywhere
+            await window._apiSave(raw);
+            setSyncDot('ok');
+          }
+        }
       } catch(e){
-        // Fall back to localStorage
+        console.warn('Firestore load failed, using local cache:', e.message);
         raw = localStorage.getItem(LS_KEY);
         setSyncDot('error');
       }
     } else {
+      // Firebase not ready (e.g. not logged in yet) — use local cache
       raw = localStorage.getItem(LS_KEY);
     }
     if(raw) state = JSON.parse(raw);
