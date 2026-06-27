@@ -349,10 +349,12 @@
 import { initializeApp }                                          from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import { getAuth, signInWithEmailAndPassword,
          createUserWithEmailAndPassword,
-         onAuthStateChanged, signOut }                            from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-import { getFirestore, doc, getDoc, setDoc }                      from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+         onAuthStateChanged, signOut,
+         indexedDBLocalPersistence,
+         setPersistence }                                          from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+import { getFirestore, doc, getDoc, setDoc,
+         enableIndexedDbPersistence }                             from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
-// ─── PASTE YOUR FIREBASE CONFIG HERE ────────────────────────────────────────
 const firebaseConfig = {
   apiKey:            "AIzaSyChjzv0auvtDbMh_uKHkorOxgb1Ss4WZQQ",
   authDomain:        "vasool-notebook.firebaseapp.com",
@@ -361,11 +363,13 @@ const firebaseConfig = {
   messagingSenderId: "15704106986",
   appId:             "1:15704106986:web:99e49d03c4d1bdfb49b493"
 };
-// ────────────────────────────────────────────────────────────────────────────
 
 const app  = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db   = getFirestore(app);
+
+// Force IndexedDB persistence — works on mobile Chrome without third-party cookies
+await setPersistence(auth, indexedDBLocalPersistence);
 
 // Load data from Firestore
 window._apiLoad = async function(){
