@@ -346,13 +346,11 @@
 <!-- Firebase Auth + Firestore (replaces Netlify Identity) -->
 <!-- STEP 1: Paste your Firebase config below (from Firebase Console > Project Settings > Your apps) -->
 <script type="module">
-import { initializeApp }                                          from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { initializeApp }                                from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import { getAuth, signInWithEmailAndPassword,
          createUserWithEmailAndPassword,
-         onAuthStateChanged, signOut,
-         indexedDBLocalPersistence,
-         setPersistence }                                          from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-import { getFirestore, doc, getDoc, setDoc }                      from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+         onAuthStateChanged, signOut }                  from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+import { getFirestore, doc, getDoc, setDoc }            from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey:            "AIzaSyChjzv0auvtDbMh_uKHkorOxgb1Ss4WZQQ",
@@ -367,30 +365,25 @@ const app  = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db   = getFirestore(app);
 
-// Force IndexedDB persistence — works on mobile Chrome without third-party cookies
-try { await setPersistence(auth, indexedDBLocalPersistence); } catch(e) { console.warn('persistence fallback:', e.message); }
+// No setPersistence — removed because it was crashing the module on mobile
+// Firebase Auth already persists sessions via IndexedDB by default in modern browsers
 
-// Module-level user reference — always up to date
-let _activeUser = null;
-
-// Load data from Firestore
-window._apiLoad = async function(){
-  const user = _activeUser || auth.currentUser;
-  if(!user) throw new Error('Not logged in');
-  const snap = await getDoc(doc(db, 'ledgers', user.uid));
+// Load data from Firestore — user passed in to avoid relying on auth.currentUser timing
+window._apiLoad = async function(uid){
+  if(!uid) throw new Error('Not logged in');
+  const snap = await getDoc(doc(db, 'ledgers', uid));
   if(!snap.exists()) return null;
   const raw = snap.data().data;
   return typeof raw === 'string' ? raw : JSON.stringify(raw);
 };
 
-// Save data to Firestore — store as plain string to avoid nested object issues
-window._apiSave = async function(jsonStr){
-  const user = _activeUser || auth.currentUser;
-  if(!user) throw new Error('Not logged in');
-  await setDoc(doc(db, 'ledgers', user.uid), {
+// Save data to Firestore — user passed in to avoid relying on auth.currentUser timing
+window._apiSave = async function(jsonStr, uid){
+  if(!uid) throw new Error('Not logged in');
+  await setDoc(doc(db, 'ledgers', uid), {
     data: jsonStr,
     updatedAt: new Date().toISOString(),
-    uid: user.uid
+    uid: uid
   });
 };
 
@@ -486,13 +479,14 @@ window._doSignup = async function(){
 
 // Listen for auth state — fires on login, signup, and page reload (stays logged in)
 onAuthStateChanged(auth, user => {
-  _activeUser = user; // keep module-level reference so _apiLoad/_apiSave always have the user
   if(user){
     document.getElementById('authOverlay')?.remove();
     window._fbReady = true;
+    window._fbUid = user.uid; // expose UID to main script
     window._startApp();
   } else {
-    _activeUser = null;
+    window._fbReady = false;
+    window._fbUid = null;
     showAuthUI();
   }
 });
@@ -544,16 +538,16 @@ function setSyncDot(status){ // 'syncing', 'ok', 'error'
 async function loadData(){
   try{
     let raw = null;
-    if(window._fbReady){
+    if(window._fbReady && window._fbUid){
       setSyncDot('syncing');
       try{
-        raw = await window._apiLoad();
+        raw = await window._apiLoad(window._fbUid);
         setSyncDot('ok');
         if(raw) localStorage.setItem(LS_KEY, raw);
         else {
           // Nothing in Firestore yet — push local data up if any
           raw = localStorage.getItem(LS_KEY);
-          if(raw){ await window._apiSave(raw); setSyncDot('ok'); }
+          if(raw){ await window._apiSave(raw, window._fbUid); setSyncDot('ok'); }
         }
       } catch(e){
         console.warn('Firestore load failed, using local cache:', e.message);
@@ -601,10 +595,10 @@ async function saveData(){
   // Debounce API save
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(async () => {
-    if(window._fbReady){
+    if(window._fbReady && window._fbUid){
       setSyncDot('syncing');
       try{
-        await window._apiSave(jsonStr);
+        await window._apiSave(jsonStr, window._fbUid);
         setSyncDot('ok');
       } catch(e){
         console.error('Firestore save error:', e.code, e.message);
