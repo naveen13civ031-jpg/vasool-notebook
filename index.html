@@ -4,12 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Finance Ledger</title>
-<link rel="manifest" href="/vasool-notebook/manifest.json">
-<meta name="theme-color" content="#6C63FF">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1B2A4A">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Vasool">
-<link rel="apple-touch-icon" href="/vasool-notebook/icon-192.png">
+<meta name="apple-mobile-web-app-title" content="Finance Ledger">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&family=Noto+Sans+Tamil:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -395,10 +395,8 @@ import { initializeApp }                                from 'https://www.gstati
 import { getAuth, signInWithEmailAndPassword,
          createUserWithEmailAndPassword,
          RecaptchaVerifier, signInWithPhoneNumber,
-         PhoneAuthProvider, EmailAuthProvider,
-         linkWithCredential, fetchSignInMethodsForEmail,
          onAuthStateChanged, signOut }                  from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-import { getFirestore, doc, getDoc, setDoc }            from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { getFirestore, doc, getDoc, setDoc, deleteDoc } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
 const firebaseConfig = {
   apiKey:            "AIzaSyChjzv0auvtDbMh_uKHkorOxgb1Ss4WZQQ",
@@ -550,39 +548,6 @@ window._doAuth = async function(){
   }
 };
 
-
-// Link phone to existing email account
-window._linkPhone = async function(){
-  if (!auth.currentUser) return;
-  const errEl = document.getElementById("authErr");
-  try {
-    ensureRecaptcha();
-    const phone = document.getElementById("auth_phone").value.trim();
-    confirmationResult = await signInWithPhoneNumber(auth, phone, recaptchaVerifier);
-    document.getElementById("phoneStep1").style.display = "none";
-    document.getElementById("phoneStep2").style.display = "";
-    errEl.style.color = "var(--green)";
-    errEl.textContent = "OTP sent! Verify to link your phone.";
-    document.getElementById("verifyOtpBtn").onclick = async function(){
-      const otp = document.getElementById("auth_otp").value.trim();
-      if (!otp || otp.length < 6){ errEl.textContent = "Enter 6-digit OTP."; return; }
-      try {
-        const credential = PhoneAuthProvider.credential(confirmationResult.verificationId, otp);
-        await linkWithCredential(auth.currentUser, credential);
-        errEl.style.color = "var(--green)";
-        errEl.textContent = "Phone linked to your account!";
-        setTimeout(() => document.getElementById("authOverlay")?.remove(), 1500);
-      } catch(e) {
-        errEl.style.color = "var(--maroon)";
-        errEl.textContent = e.code === "auth/invalid-verification-code" ? "Wrong OTP." : (e.message || "Linking failed.");
-      }
-    };
-  } catch(e) {
-    errEl.style.color = "var(--maroon)";
-    errEl.textContent = e.message || "Failed to send OTP.";
-    recaptchaVerifier = null;
-  }
-};
 // Email sign up
 window._doSignup = async function(){
   const email = document.getElementById('auth_email2').value.trim();
@@ -602,19 +567,13 @@ window._doSignup = async function(){
   }
 };
 
-// Phone — send OTP (auto-links if user already logged in via email)
+// Phone — send OTP
 window._sendOtp = async function(){
   const phone = document.getElementById('auth_phone').value.trim();
   const errEl = document.getElementById('authErr');
   const btn   = document.getElementById('sendOtpBtn');
   if(!phone){ errEl.textContent = 'Please enter your mobile number.'; return; }
   btn.textContent = 'Sending…'; btn.disabled = true; errEl.textContent = '';
-
-  // If already signed in via email, route to link flow instead
-  if (auth.currentUser && auth.currentUser.email) {
-    return window._linkPhone();
-  }
-
   try{
     ensureRecaptcha();
     confirmationResult = await signInWithPhoneNumber(auth, phone, recaptchaVerifier);
@@ -629,11 +588,11 @@ window._sendOtp = async function(){
     errEl.style.color = 'var(--maroon)';
     errEl.textContent = msg;
     btn.textContent = 'Send OTP'; btn.disabled = false;
-    recaptchaVerifier = null;
+    recaptchaVerifier = null; // reset so it can retry
   }
 };
 
-// Phone — verify OTP (with auto account linking)
+// Phone — verify OTP
 window._verifyOtp = async function(){
   const otp   = document.getElementById('auth_otp').value.trim();
   const errEl = document.getElementById('authErr');
@@ -641,63 +600,52 @@ window._verifyOtp = async function(){
   if(!otp || otp.length < 6){ errEl.textContent = 'Please enter the 6-digit OTP.'; return; }
   btn.textContent = 'Verifying…'; btn.disabled = true;
   errEl.style.color = 'var(--maroon)'; errEl.textContent = '';
-  try {
-    const result = await confirmationResult.confirm(otp);
-    const phoneUser = result.user;
-
-    // Check if this phone number was previously a separate account
-    // by looking for a Firestore record under the old phone UID
-    const phoneSnap = await getDoc(doc(db, 'ledgers', phoneUser.uid));
-
-    // If phone account has no data yet, check if there's an email account
-    // with data that should be merged — ask user for their email
-    if (!phoneSnap.exists()) {
-      // Show merge prompt
-      errEl.style.color = 'var(--primary)';
-      errEl.textContent = '✅ Phone verified!';
-      // onAuthStateChanged will handle the rest
-    } else {
-      errEl.style.color = 'var(--green)';
-      errEl.textContent = '✅ Signed in!';
-    }
+  try{
+    await confirmationResult.confirm(otp);
     // onAuthStateChanged will fire and start the app
-
   } catch(err){
-    if (err.code === 'auth/credential-already-in-use') {
-      // Phone number already linked to another account — link them
-      errEl.style.color = 'var(--amber)';
-      errEl.textContent = 'Linking your accounts…';
-      try {
-        const credential = PhoneAuthProvider.credentialFromError(err);
-        await linkWithCredential(auth.currentUser, credential);
-        errEl.style.color = 'var(--green)';
-        errEl.textContent = '✅ Accounts linked!';
-      } catch(linkErr){
-        errEl.textContent = linkErr.message || 'Linking failed.';
-        btn.textContent = 'Verify & Sign In'; btn.disabled = false;
-      }
-    } else {
-      const msg = err.code === 'auth/invalid-verification-code' ? 'Wrong OTP. Please check and try again.'
-                : err.code === 'auth/code-expired'              ? 'OTP expired. Please go back and resend.'
-                : (err.message || 'Verification failed.');
-      errEl.textContent = msg;
-      btn.textContent = 'Verify & Sign In'; btn.disabled = false;
-    }
+    const msg = err.code === 'auth/invalid-verification-code' ? 'Wrong OTP. Please check and try again.'
+              : err.code === 'auth/code-expired'              ? 'OTP expired. Please go back and resend.'
+              : (err.message || 'Verification failed.');
+    errEl.textContent = msg;
+    btn.textContent = 'Verify & Sign In'; btn.disabled = false;
   }
 };
 
-// Auth state listener
-onAuthStateChanged(auth, user => {
+// Auth state listener — detects owner vs agent role
+onAuthStateChanged(auth, async user => {
   if(user){
     document.getElementById('authOverlay')?.remove();
-    window._fbReady  = true;
-    window._fbUid    = user.uid;
-    window._fbEmail  = user.email || user.phoneNumber || '—';
+    window._fbUid   = user.uid;
+    window._fbEmail = user.email || user.phoneNumber || '—';
+    try{
+      const userSnap = await getDoc(doc(db, 'users', user.uid));
+      if(userSnap.exists()){
+        const ud = userSnap.data();
+        window._role           = ud.role || 'owner';
+        window._agentName      = ud.agentName || '';
+        window._assignedGroups = ud.assignedGroups || [];
+        window._ownerUid       = ud.role === 'agent' ? ud.ownerUid : user.uid;
+      } else {
+        // First-time login — default to owner
+        window._role           = 'owner';
+        window._agentName      = '';
+        window._assignedGroups = [];
+        window._ownerUid       = user.uid;
+        await setDoc(doc(db,'users',user.uid),{ role:'owner', createdAt:new Date().toISOString() });
+      }
+    } catch(e){
+      // Fallback if Firestore check fails
+      window._role = 'owner'; window._ownerUid = user.uid;
+    }
+    window._fbReady = true;
     window._startApp();
   } else {
     window._fbReady = false;
     window._fbUid   = null;
     window._fbEmail = null;
+    window._role    = null;
+    window._ownerUid = null;
     showAuthUI();
   }
 });
@@ -706,6 +654,11 @@ onAuthStateChanged(auth, user => {
 window._logout = async function(){
   await signOut(auth);
   location.reload();
+};
+
+// Expose invite saver for agent management
+window._fbSaveInvite = async function(invKey, data){
+  await setDoc(doc(db,'invites',invKey), data);
 };
 </script>
 
@@ -732,15 +685,15 @@ const LANG = {
     save:'Save', cancel:'Cancel', confirm:'Confirm', close:'Close',
     nextDue:'Next due', started:'Started', fullyRepaid:'✓ Loan fully repaid',
     referredBy:'Referred by', joinDate:'Joined', area:'Area', mobile:'Mobile',
-    noLoans:'No loans yet for this customer.', noCustomers:'No customers in this tab yet.',
+    noLoans:'${T("noLoans")}', noCustomers:'No customers in this tab yet.',
     ledgerEmpty:'Your ledger is empty.', createTab:'Create a collection tab and add your first customer to begin.',
     allClear:'✓ All clear — nothing due or overdue today.',
     topReferrers:'🤝 Top Referrers', referred:'referred',
-    exportReports:'📊 Export Reports', dailyReport:'Daily Report', monthlyReport:'Monthly Report',
-    allCustomers:'All Customers', fullLedger:'Full Ledger', lineWise:'🗂 Line-wise Reports',
+    exportReports:'📊 ${T("exportReports")||"Export Reports"}', dailyReport:'Daily Report', monthlyReport:'Monthly Report',
+    allCustomers:'All Customers', fullLedger:'Full Ledger', lineWise:'🗂 ${T("linewiseReports")||"Line-wise Reports"}',
     todaysCols:'Today\'s collections', monthSummary:'This month\'s summary',
     fullCustList:'Full customer list', allLoansPayments:'All loans + payments',
-    recentEntries:'Recent Entries', noEntries:'No investments, withdrawals or expenses recorded yet.',
+    recentEntries:'${T("recentEntries")||"Recent Entries"}', noEntries:'No investments, withdrawals or expenses recorded yet.',
     addLoan:'New Loan', editLoanTitle:'Edit Loan', principal:'Principal (₹)', rate:'Interest Rate (%)',
     numEmis:'Number of EMIs', frequency:'Frequency', startDate:'Start Date',
     amtCollected:'Amount Collected (₹)', date:'Date', note:'Note (optional)',
@@ -752,6 +705,11 @@ const LANG = {
     custArea:'Area', custJoin:'Join date', referral:'Referred by', saveCust:'Save Customer', addCust:'Add Customer', editCust:'Edit Customer',
     weekly:'Weekly', daily:'Daily', monthly2:'Monthly',
     editCollTitle:'Edit Collection Entry',
+    manageAgentsTitle:'Manage Agents', agentActivity:'Agent Activity',
+    todayCollections:"Today's collections", monthlySummary:"This month's summary",
+    fullCustomerList:'Full customer list', fullLedgerSub:'All loans + payments',
+    monthlyOverview:'Monthly Overview', linewiseReports:'Line-wise Reports',
+    exportReports2:'Export Reports',
   },
   ta:{
     dashboard:'முகப்பு', accounts:'கணக்குகள்', addTab:'+ தாவல்',
@@ -789,6 +747,10 @@ const LANG = {
     custArea:'பகுதி', custJoin:'சேர்ந்த தேதி', referral:'அறிமுகப்படுத்தியவர்', saveCust:'வாடிக்கையாளர் சேமி', addCust:'வாடிக்கையாளர் சேர்', editCust:'வாடிக்கையாளர் திருத்து',
     weekly:'வாராந்திரம்', daily:'தினசரி', monthly2:'மாதாந்திரம்',
     editCollTitle:'வசூல் பதிவு திருத்து',
+    manageAgentsTitle:'ஏஜென்ட்களை நிர்வகி', agentActivity:'ஏஜென்ட் செயல்பாடு',
+    todayCollections:'இன்றைய வசூல்கள்', monthlySummary:'இந்த மாத சுருக்கம்',
+    fullCustomerList:'முழு வாடிக்கையாளர் பட்டியல்', fullLedgerSub:'அனைத்து கடன்கள் + செலுத்துதல்',
+    monthlyOverview:'மாத கண்ணோட்டம்', linewiseReports:'வரிசை அறிக்கைகள்',
   }
 };
 function T(key){ const lang = (state&&state.lang==='ta')?'ta':'en'; return (LANG[lang]&&LANG[lang][key]) || LANG.en[key] || key; }
@@ -829,15 +791,15 @@ function setSyncDot(status){ // 'syncing', 'ok', 'error'
 async function loadData(){
   try{
     let raw = null;
-    if(window._fbReady && window._fbUid){
+    if(window._fbReady && (window._ownerUid||window._fbUid)){
       setSyncDot('syncing');
       try{
-        raw = await window._apiLoad(window._fbUid);
+        raw = await window._apiLoad(window._ownerUid || window._fbUid);
         setSyncDot('ok');
         if(raw) localStorage.setItem(LS_KEY, raw);
         else {
           raw = localStorage.getItem(LS_KEY);
-          if(raw){ await window._apiSave(raw, window._fbUid); setSyncDot('ok'); }
+          if(raw){ await window._apiSave(raw, window._ownerUid || window._fbUid); setSyncDot('ok'); }
         }
       } catch(e){
         console.warn('Firestore load failed, using local cache:', e.message);
@@ -860,6 +822,8 @@ async function loadData(){
     await saveData();
   }
   if(!Array.isArray(state.transactions)) state.transactions = [];
+  if(!Array.isArray(state.notifications)) state.notifications = [];
+  if(!Array.isArray(state.agents)) state.agents = [];
   const OLD_DEFAULTS = ['Sunday Weekly Finance','Sunday Evening Finance'];
   state.groups = state.groups.filter(g => {
     const isDefault = OLD_DEFAULTS.includes(g.name);
@@ -885,10 +849,10 @@ async function saveData(){
   // Debounce API save
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(async () => {
-    if(window._fbReady && window._fbUid){
+    if(window._fbReady && (window._ownerUid||window._fbUid)){
       setSyncDot('syncing');
       try{
-        await window._apiSave(jsonStr, window._fbUid);
+        await window._apiSave(jsonStr, window._ownerUid || window._fbUid);
         setSyncDot('ok');
       } catch(e){
         console.error('Firestore save error:', e.code, e.message);
@@ -897,6 +861,29 @@ async function saveData(){
       }
     }
   }, 800);
+}
+
+/* ---------------- Role helpers ---------------- */
+function isOwner(){ return !window._role || window._role === 'owner'; }
+function isAgent(){ return window._role === 'agent'; }
+
+async function addNotification(action, details){
+  if(!Array.isArray(state.notifications)) state.notifications = [];
+  state.notifications.unshift({
+    id: uid('ntf'),
+    agentUid:  window._fbUid,
+    agentName: window._agentName || 'Agent',
+    action, details,
+    timestamp: new Date().toISOString(),
+    read: false
+  });
+  // Keep last 100 notifications only
+  if(state.notifications.length > 100) state.notifications = state.notifications.slice(0,100);
+  await saveData();
+}
+
+function unreadNotifCount(){
+  return (state.notifications||[]).filter(n=>!n.read).length;
 }
 
 /* ---------------- Derived helpers ---------------- */
@@ -1054,8 +1041,13 @@ function render(){
     <div class="cover">
       <div class="cover-top">
         <button class="icon-btn" onclick="toggleSearch()">🔎</button>
-        <h1 class="biz-name" onclick="openSettings()">${escapeHtml(state.businessName)}</h1>
-        <button class="icon-btn" onclick="openSettings()">⚙️</button>
+        <h1 class="biz-name" onclick="openSettings()">${escapeHtml(state.businessName)}
+          ${isAgent()?`<span style="font-size:10px;font-weight:600;opacity:0.75;display:block;">Agent: ${escapeHtml(window._agentName||'')}</span>`:''}
+        </h1>
+        <div style="display:flex;gap:6px;align-items:center;">
+          ${isOwner() && unreadNotifCount()>0 ? `<button class="icon-btn" onclick="openNotifications()" style="position:relative;">🔔<span style="position:absolute;top:-4px;right:-4px;background:#EF4444;color:#fff;border-radius:50%;width:17px;height:17px;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;">${unreadNotifCount()}</span></button>` : ''}
+          <button class="icon-btn" onclick="openSettings()">⚙️</button>
+        </div>
       </div>
       <div class="search-bar ${ui.searchOpen?'':'hidden'}" style="${ui.searchOpen?'':'display:none'}">
         <input id="searchInput" placeholder="Search name, code or mobile…" value="${escapeAttr(ui.searchQuery)}" oninput="onSearch(this.value)">
@@ -1065,14 +1057,14 @@ function render(){
     </div>
     <nav class="tab-rail">
       <div class="tab-chip dashboard ${ui.activeTab==='dashboard'?'active':''}" onclick="setTab('dashboard')">📊 ${T('dashboard')}</div>
-      <div class="tab-chip dashboard" style="background:var(--gold); color:#2A2110; ${ui.activeTab==='accounts'?'':'opacity:0.62; transform:translateY(4px) scale(0.96);'}" onclick="setTab('accounts')">💰 Accounts</div>
-      ${state.groups.map(g=>`
+      ${isOwner()?`<div class="tab-chip dashboard" style="background:var(--gold);color:#2A2110;${ui.activeTab==='accounts'?'':'opacity:0.62'}" onclick="setTab('accounts')">💰 ${T('accounts')}</div>`:''}
+      ${(isOwner()?state.groups:state.groups.filter(g=>(window._assignedGroups||[]).includes(g.id))).map(g=>`
         <div class="tab-chip ${ui.activeTab===g.id?'active':''}" style="background:${g.color}" onclick="setTab('${g.id}')">${escapeHtml(g.name)}</div>
       `).join('')}
-      <div class="tab-chip addnew" onclick="openAddGroup()">${T('addTab')}</div>
+      ${isOwner()?`<div class="tab-chip addnew" onclick="openAddGroup()">+ Tab</div>`:''}
     </nav>
-    <main id="mainContent">${ui.activeTab==='dashboard' ? renderDashboard(t) : ui.activeTab==='accounts' ? renderAccounts() : renderGroupView(ui.activeTab)}</main>
-    <button class="fab" onclick="onFab()">${ui.activeTab==='dashboard' ? '➕ '+T('newColTab') : ui.activeTab==='accounts' ? '➕ '+T('addEntry') : '➕ '+T('addCustomer')}</button>
+    <main id="mainContent">${ui.activeTab==='dashboard'?renderDashboard(t):ui.activeTab==='accounts'?renderAccounts():renderGroupView(ui.activeTab)}</main>
+    <button class="fab" onclick="onFab()" style="${ui.activeTab==='dashboard'&&isAgent()?'display:none':''}">${ui.activeTab==='dashboard'?'➕ New Collection Tab':ui.activeTab==='accounts'?'➕ Add Entry':'➕ '+T('addCustomer')}</button>
   `;
   renderModal();
 }
@@ -1080,10 +1072,10 @@ function render(){
 function renderSummaryRow(t){
   return `
     <div class="summary-row">
-      <div class="stat"><div class="v mono">${state.customers.length}</div><div class="l">${T('customers')}</div></div>
-      <div class="stat"><div class="v mono">${fmtINR(t.outstanding)}</div><div class="l">${T('outstanding')}</div></div>
-      <div class="stat warn"><div class="v mono">${fmtINR(t.dueToday)}</div><div class="l">${T('dueToday')}</div></div>
-      <div class="stat danger"><div class="v mono">${fmtINR(t.overdue)}</div><div class="l">${T('overdue')}</div></div>
+      <div class="stat"><div class="v mono">${state.customers.length}</div><div class="l">Customers</div></div>
+      <div class="stat"><div class="v mono">${fmtINR(t.outstanding)}</div><div class="l">Outstanding</div></div>
+      <div class="stat warn"><div class="v mono">${fmtINR(t.dueToday)}</div><div class="l">Due Today</div></div>
+      <div class="stat danger"><div class="v mono">${fmtINR(t.overdue)}</div><div class="l">Overdue</div></div>
     </div>`;
 }
 
@@ -1106,7 +1098,7 @@ function renderSearchResults(){
 function renderDashboard(t){
   if(state.customers.length===0){
     return `<div class="empty"><div class="big">📒</div>
-      <p>Your ledger is empty.<br>Create a collection tab and add your first customer to begin.</p></div>`;
+      <p>${T("ledgerEmpty")}<br>${T("createTab")}</p></div>`;
   }
   const td = todayStats();
   const mn = monthlyStats();
@@ -1116,7 +1108,7 @@ function renderDashboard(t){
 
   /* ---- Total Accounts Summary ---- */
   let html = `
-  <div class="section-title" style="margin-top:0;">📊 Total Accounts</div>
+  <div class="section-title" style="margin-top:0;">📊 ${T("totalAccounts")}</div>
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px;">
     <div class="dash-stat-card" style="border-color:var(--navy);">
       <div class="ds-icon">👥</div>
@@ -1279,13 +1271,13 @@ function renderGroupView(groupId){
   const g = getGroup(groupId);
   if(!g){ ui.activeTab='dashboard'; return renderDashboard(allTotals()); }
   const allCusts = groupCustomers(groupId);
-  let html = `<div class="section-title" style="display:flex;align-items:center;gap:6px;">
-    <span style="flex:1;">${escapeHtml(g.name)}</span>
-    <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:12px;" onclick="openEditGroup('${g.id}')">✏️</button>
-    <button class="btn btn-sm" style="padding:3px 8px;font-size:12px;background:var(--maroon,#8B2E2E);color:#fff;border:none;border-radius:6px;" onclick="confirmDeleteGroup('${g.id}')">🗑</button>
-  </div>`;
+  let html = `<div class="section-title">${escapeHtml(g.name)} — ${allCusts.length} customer${allCusts.length!==1?'s':''}
+    <span style="float:right; display:flex; gap:8px; align-items:center;">
+      ${isOwner()?`<span style="cursor:pointer;color:var(--primary);font-size:12px;" onclick="openEditGroup('${g.id}')">✏️ Edit</span>`:''}
+      ${isOwner()?`<span style="cursor:pointer;color:var(--maroon);font-size:12px;" onclick="confirmDeleteGroup('${g.id}')">🗑 Delete</span>`:''}
+    </span></div>`;
   if(!allCusts.length){
-    html += `<div class="empty"><div class="big">🧾</div><p>${T('noCustomers')}</p></div>`;
+    html += `<div class="empty"><div class="big">🧾</div><p>${T("noCustomers")}<br>Tap "${T("addCustomer")}" below.</p></div>`;
     return html;
   }
   const activeCount = allCusts.filter(c=>customerActive(c.id)).length;
@@ -1346,12 +1338,12 @@ function renderAccounts(){
     <div class="report-btn" onclick="exportExcel('all_customers')">
       <div class="ic">👥</div>
       <div class="lbl">All Customers</div>
-      <div class="sub">Full customer list</div>
+      <div class="sub">${T("fullCustomerList")||"Full customer list"}</div>
     </div>
     <div class="report-btn" onclick="exportExcel('full_ledger')">
       <div class="ic">📒</div>
       <div class="lbl">Full Ledger</div>
-      <div class="sub">All loans + payments</div>
+      <div class="sub">${T("fullLedgerSub")||"All loans + payments"}</div>
     </div>
   </div>
 
@@ -1421,10 +1413,10 @@ function renderCustomerCard(c){
       🤝 Referred by <b>${referrer?escapeHtml(referrer.name):'—'}</b>
     </div>
     <div class="cust-actions" style="flex-wrap:wrap;">
-      <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); openAddLoan('${c.id}')">➕ New Loan</button>
-      <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); openEditCustomer('${c.id}')">✏️ Edit</button>
-      <button class="btn btn-sm" style="background:${isActive?'var(--green-light)':'var(--surface2)'}; color:${isActive?'var(--green)':'var(--ink-soft)'}; border:1.5px solid ${isActive?'var(--green)':'var(--border)'};" onclick="event.stopPropagation(); toggleCustomerStatus('${c.id}')">${isActive?T('active'):T('inactive')}</button>
-      <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); confirmDeleteCustomer('${c.id}')">🗑 Delete</button>
+      <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); openAddLoan('${c.id}')">${T("newLoan")}</button>
+      <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); openEditCustomer('${c.id}')">${T("edit")}</button>
+      ${isOwner()?`<button class="btn btn-sm" style="background:${isActive?'var(--green-light)':'var(--surface2)'}; color:${isActive?'var(--green)':'var(--ink-soft)'}; border:1.5px solid ${isActive?'var(--green)':'var(--border)'};" onclick="event.stopPropagation(); toggleCustomerStatus('${c.id}')">${isActive?T('active'):T('inactive')}</button>`:''}
+      ${isOwner()?`<button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); confirmDeleteCustomer('${c.id}')">🗑 Delete</button>`:''}
     </div>`;
 
   if(!loans.length){
@@ -1465,7 +1457,7 @@ function renderLoanCard(l){
       </div>
       <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
         ${badge}
-        <button class="icon-mini" onclick="confirmDeleteLoan('${l.id}')">🗑</button>
+        ${isOwner()?`<button class="icon-mini" onclick="confirmDeleteLoan('${l.id}')">🗑</button>`:''}
       </div>
     </div>
     <div class="loan-progress"><div style="width:${pct}%; background:${s.overdue>0?'var(--maroon)':s.completed?'var(--green)':'var(--navy)'}"></div></div>
@@ -1476,11 +1468,11 @@ function renderLoanCard(l){
       }
     </div>
     ${!s.completed ? `<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-      <button class="btn btn-primary btn-sm" style="justify-content:center; background:var(--green);" onclick="event.stopPropagation(); markPaid('${l.id}')">✓ Mark EMI Paid<br><span style="font-size:10px; font-weight:400; opacity:0.85;">${fmtINR(s.next.amount)}</span></button>
-      <button class="btn btn-ghost btn-sm" style="justify-content:center; border:1.5px solid var(--rule);" onclick="event.stopPropagation(); openCustomCollect('${l.id}')">₹ Custom Amount<br><span style="font-size:10px; font-weight:400; color:var(--ink-soft);">enter any amount</span></button>
+      <button class="btn btn-primary btn-sm" style="justify-content:center; background:var(--green);" onclick="event.stopPropagation(); markPaid('${l.id}')">${T("markPaid")}<br><span style="font-size:10px; font-weight:400; opacity:0.85;">${fmtINR(s.next.amount)}</span></button>
+      <button class="btn btn-ghost btn-sm" style="justify-content:center; border:1.5px solid var(--rule);" onclick="event.stopPropagation(); openCustomCollect('${l.id}')">${T("customAmt")}<br><span style="font-size:10px;font-weight:400;color:var(--ink-soft);">${T("enterAnyAmt")}</span></button>
     </div>` : ''}
     <button class="btn btn-ghost btn-sm btn-block" style="margin-top:8px;" onclick="event.stopPropagation(); openLoanHistory('${l.id}')">${T('viewHistory')}</button>
-    <button class="btn btn-ghost btn-sm btn-block" style="margin-top:6px; color:var(--amber);" onclick="event.stopPropagation(); openEditLoan('${l.id}')">${T('editLoan')}</button>
+    ${isOwner()?`<button class="btn btn-ghost btn-sm btn-block" style="margin-top:6px; color:var(--amber);" onclick="event.stopPropagation(); openEditLoan('${l.id}')">${T('editLoan')}</button>`:''}
     ${recentCols.length ? `<div style="margin-top:10px; border-top:1px solid var(--border); padding-top:8px;">
       <div style="font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink3); margin-bottom:6px; font-weight:700;">${T('recentCols')}</div>
       ${recentCols.map(col=>`<div style="display:flex; align-items:center; justify-content:space-between; font-size:11.5px; padding:5px 0; border-bottom:1px solid var(--border);">
@@ -1521,6 +1513,9 @@ function modalBody(){
   if(m.type==='loanHistory') return loanHistoryModal(m.payload.loanId);
   if(m.type==='addTransaction') return transactionForm(m.payload.type);
   if(m.type==='settings') return settingsForm();
+  if(m.type==='notifications') return notificationsModal();
+  if(m.type==='manageAgents') return manageAgentsModal();
+  if(m.type==='addAgent') return addAgentModal();
   if(m.type==='confirm') return confirmForm(m.payload);
   return '';
 }
@@ -1528,7 +1523,7 @@ function modalBody(){
 function groupForm(existing){
   const colorSel = existing ? existing.color : COLORS[state.groups.length % COLORS.length];
   return `<div class="sheet-handle"></div>
-    <h2>${existing?T('editTab'):T('newTab')}</h2>
+    <h2>${existing?'Edit Tab':'New Collection Tab'}</h2>
     <div class="field"><label>Tab name</label><input id="f_groupName" placeholder="e.g. Monday Evening Finance" value="${existing?escapeAttr(existing.name):''}"></div>
     <div class="field"><label>Color</label><div class="swatches" id="swatchRow">
       ${COLORS.map(c=>`<div class="swatch ${c===colorSel?'sel':''}" style="background:${c}" data-c="${c}" onclick="pickSwatch(this)"></div>`).join('')}
@@ -1602,7 +1597,11 @@ async function saveCustomer(existingId, groupId){
   if(!code){ showToast('Enter a customer code'); return; }
   if(existingId){
     const c = getCustomer(existingId);
+    const oldName = c.name;
     Object.assign(c, {name,code,mobile,area,joinDate,referral});
+    if(isAgent()){
+      await addNotification('edit_customer', `Edited customer "${oldName}" → name: ${name}, mobile: ${mobile}, area: ${area}`);
+    }
   } else {
     state.customers.push({id:uid('cus'), name,code,mobile,area,joinDate,referral, groupId});
   }
@@ -1678,7 +1677,7 @@ function setTxType(type){
 function transactionForm(type){
   const isExpense = type==='expense';
   return `<div class="sheet-handle"></div>
-    <h2>${T('addEntry')}</h2>
+    <h2>Add Entry</h2>
     <div class="seg-row">
       <div class="seg-btn ${type==='investment'?'active':''}" onclick="setTxType('investment')">📥 Investment</div>
       <div class="seg-btn ${type==='withdrawal'?'active':''}" onclick="setTxType('withdrawal')">📤 Withdrawal</div>
@@ -1771,7 +1770,30 @@ function settingsForm(){
     <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">
       <div class="section-title" style="margin-top:0; color:var(--red);">${T('danger')}</div>
       <button class="btn btn-danger btn-block" onclick="confirmWipeAll()">${T('wipeAll')}</button>
-    </div>`;
+    </div>
+
+    ${isOwner() ? `
+    <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">
+      <div class="section-title" style="margin-top:0;">👥 ${T("manageAgentsTitle")||"Manage Agents"}</div>
+      <div style="font-size:12.5px; color:var(--ink-soft); margin-bottom:10px; line-height:1.6;">
+        Agents can collect EMIs, add customers, and add loans on their assigned lines.<br>
+        You will receive a notification for every edit they make.
+      </div>
+      ${(state.agents||[]).length === 0
+        ? `<div style="font-size:13px; color:var(--ink-soft); padding:10px 0;">No agents added yet.</div>`
+        : (state.agents||[]).map(a=>`
+          <div style="display:flex; align-items:center; gap:10px; background:var(--surface2); border-radius:12px; padding:10px 12px; margin-bottom:8px;">
+            <div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--primary-dark));color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0;">${a.name.charAt(0).toUpperCase()}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:13.5px;font-weight:700;color:var(--ink);">${escapeHtml(a.name)}</div>
+              <div style="font-size:11px;color:var(--ink-soft);">${escapeHtml(a.email)} · ${(a.assignedGroups||[]).map(gid=>{const g=getGroup(gid);return g?escapeHtml(g.name):'';}).filter(Boolean).join(', ')||'No lines assigned'}</div>
+              <div style="font-size:10px;margin-top:2px;padding:2px 6px;border-radius:20px;display:inline-block;background:${a.status==='active'?'var(--green-light)':'var(--amber-light)'};color:${a.status==='active'?'var(--green)':'var(--amber)'};">${a.status==='active'?'✓ Registered':'⏳ Pending registration'}</div>
+            </div>
+            <button class="icon-mini" onclick="removeAgent('${a.id}')">🗑</button>
+          </div>`).join('')
+      }
+      <button class="btn btn-primary btn-block" style="margin-top:8px;" onclick="closeModal(); openManageAgents();">+ Add New Agent</button>
+    </div>` : ''}`;
 }
 
 async function toggleLang(){
@@ -1841,7 +1863,7 @@ function confirmWipeAll(){
 async function wipeAllData(){
   state = {
     businessName: state.businessName || 'My Finance Book',
-    groups: [], customers: [], loans: [], transactions: []
+    groups: [], customers: [], loans: [], transactions: [], notifications: [], agents: []
   };
   await saveData();
   closeModal();
@@ -1849,6 +1871,112 @@ async function wipeAllData(){
   render();
   showToast('All data cleared');
 }
+
+/* ── Notifications Modal ── */
+function notificationsModal(){
+  const notifs = (state.notifications||[]);
+  // Mark all as read
+  notifs.forEach(n=>n.read=true);
+  saveData();
+  return `<div class="sheet-handle"></div>
+    <h2>🔔 Agent Activity</h2>
+    ${notifs.length===0
+      ? `<div class="empty"><div class="big">🔔</div><p>No agent edits yet.<br>When agents edit customer details or payments, you'll see it here.</p></div>`
+      : notifs.map(n=>`
+        <div style="display:flex;gap:10px;align-items:flex-start;background:var(--surface2);border-radius:12px;padding:12px;margin-bottom:8px;">
+          <div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--primary-dark));color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;">${(n.agentName||'A').charAt(0).toUpperCase()}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12.5px;font-weight:700;color:var(--ink);">${escapeHtml(n.agentName||'Agent')}</div>
+            <div style="font-size:12px;color:var(--ink-soft);margin-top:2px;line-height:1.5;">${escapeHtml(n.details||n.action)}</div>
+            <div style="font-size:10.5px;color:var(--ink-soft);margin-top:4px;">${fmtDate(n.timestamp?.slice(0,10))} ${n.timestamp?new Date(n.timestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):''}</div>
+          </div>
+        </div>`).join('')
+    }
+    <button class="btn btn-ghost btn-block" style="margin-top:12px;" onclick="clearNotifications()">Clear All</button>`;
+}
+
+async function clearNotifications(){
+  state.notifications = [];
+  await saveData();
+  closeModal();
+  render();
+}
+
+/* ── Manage Agents Modal ── */
+function manageAgentsModal(){
+  return `<div class="sheet-handle"></div>
+    <h2>👥 Add New Agent</h2>
+    <div style="background:var(--primary-light);border-radius:12px;padding:12px 14px;font-size:12.5px;color:var(--primary-dark);margin-bottom:16px;line-height:1.7;">
+      <b>How it works:</b><br>
+      1. Enter agent details and assign their collection lines<br>
+      2. Share the app link + their email + password with them<br>
+      3. Agent opens app → Register → automatically gets agent access
+    </div>
+    <div class="field"><label>Agent Name</label><input id="f_ag_name" placeholder="e.g. Ravi Kumar"></div>
+    <div class="field"><label>Agent Email</label><input id="f_ag_email" type="email" placeholder="ravi@example.com"></div>
+    <div class="field"><label>Temporary Password (share with agent)</label><input id="f_ag_pass" placeholder="min 8 characters"></div>
+    <div class="field"><label>Assign Collection Lines</label>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:6px;" id="lineCheckboxes">
+        ${state.groups.map(g=>`
+          <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:10px;cursor:pointer;">
+            <input type="checkbox" value="${g.id}" style="width:16px;height:16px;accent-color:var(--primary);">
+            <span style="display:flex;align-items:center;gap:6px;font-size:13.5px;font-weight:600;">
+              <span style="width:10px;height:10px;border-radius:50%;background:${g.color};display:inline-block;"></span>
+              ${escapeHtml(g.name)}
+            </span>
+          </label>`).join('')}
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveNewAgent()">Add Agent</button>
+    </div>`;
+}
+
+async function saveNewAgent(){
+  const name  = document.getElementById('f_ag_name').value.trim();
+  const email = document.getElementById('f_ag_email').value.trim().toLowerCase();
+  const pass  = document.getElementById('f_ag_pass').value;
+  const boxes = document.querySelectorAll('#lineCheckboxes input[type=checkbox]:checked');
+  const assignedGroups = Array.from(boxes).map(b=>b.value);
+  if(!name){ showToast('Enter agent name'); return; }
+  if(!email || !email.includes('@')){ showToast('Enter valid email'); return; }
+  if(!pass || pass.length < 8){ showToast('Password must be at least 8 characters'); return; }
+  if(!assignedGroups.length){ showToast('Assign at least one collection line'); return; }
+
+  try{
+    // Save invite to Firestore so when agent registers, role is auto-assigned
+    const invKey = email.replace(/[^a-z0-9]/g,'_');
+    // Use window._fbApiSaveInvite exposed from auth module
+    if(window._fbSaveInvite){
+      await window._fbSaveInvite(invKey, {
+        ownerUid: window._fbUid,
+        agentName: name,
+        assignedGroups,
+        email,
+        createdAt: new Date().toISOString()
+      });
+    }
+    // Save agent record in state
+    if(!Array.isArray(state.agents)) state.agents = [];
+    state.agents.push({ id:uid('agt'), name, email, assignedGroups, status:'pending', createdAt:todayISO() });
+    await saveData();
+    closeModal();
+    showToast(`Agent "${name}" added — share app link + email + password with them`);
+    render();
+  } catch(e){
+    showToast('Error adding agent: ' + (e.message||'try again'));
+  }
+}
+
+async function removeAgent(agentId){
+  state.agents = (state.agents||[]).filter(a=>a.id!==agentId);
+  await saveData();
+  render();
+  showToast('Agent removed');
+}
+
+
 
 
 function confirmForm(payload){
@@ -1879,11 +2007,13 @@ function onFab(){
   else { openAddCustomer(ui.activeTab); }
 }
 function openAddGroup(){ ui.modal={type:'addGroup'}; render(); }
-function openEditGroup(id){ ui.modal={type:'editGroupColor', payload:getGroup(id)}; render(); }
+function openEditGroup(groupId){ ui.modal={type:'editGroupColor', payload:getGroup(groupId)}; render(); }
 function openAddCustomer(groupId){ ui.modal={type:'addCustomer', payload:{groupId}}; render(); }
 function openEditCustomer(custId){ ui.modal={type:'editCustomer', payload:getCustomer(custId)}; render(); }
 function openAddLoan(custId){ ui.modal={type:'addLoan', payload:{customerId:custId}}; render(); }
 function openAddTransaction(type){ ui.modal={type:'addTransaction', payload:{type}}; render(); }
+function openNotifications(){ ui.modal={type:'notifications'}; render(); }
+function openManageAgents(){ ui.modal={type:'manageAgents'}; render(); }
 function openSettings(){ ui.modal={type:'settings'}; render(); }
 
 async function markPaid(loanId){
@@ -2010,7 +2140,12 @@ async function saveEditCollection(loanId, colId){
   const date   = document.getElementById('f_ec_date').value || col.date;
   const note   = document.getElementById('f_ec_note').value.trim() || null;
   if(!amount||amount<=0){ showToast('Enter valid amount'); return; }
+  const oldAmount = col.amount;
   col.amount = amount; col.date = date; col.note = note;
+  if(isAgent()){
+    const c = getCustomer(l.customerId);
+    await addNotification('edit_collection', `Edited payment for "${c?c.name:'customer'}" — ₹${oldAmount} → ₹${amount} on ${fmtDate(date)}`);
+  }
   await saveData(); closeModal();
   showToast('Collection updated ✓');
 }
