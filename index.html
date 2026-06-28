@@ -616,8 +616,14 @@ window._verifyOtp = async function(){
 onAuthStateChanged(auth, async user => {
   if(user){
     document.getElementById('authOverlay')?.remove();
-    window._fbUid   = user.uid;
-    window._fbEmail = user.email || user.phoneNumber || '—';
+    window._fbUid    = user.uid;
+    window._fbEmail  = user.email || user.phoneNumber || '—';
+    // Default to owner before any async check — guarantees _ownerUid is always set
+    window._role           = 'owner';
+    window._agentName      = '';
+    window._assignedGroups = [];
+    window._ownerUid       = user.uid;
+    // Then try to get role from Firestore (may fail if rules not published yet)
     try{
       const userSnap = await getDoc(doc(db, 'users', user.uid));
       if(userSnap.exists()){
@@ -625,26 +631,22 @@ onAuthStateChanged(auth, async user => {
         window._role           = ud.role || 'owner';
         window._agentName      = ud.agentName || '';
         window._assignedGroups = ud.assignedGroups || [];
-        window._ownerUid       = ud.role === 'agent' ? ud.ownerUid : user.uid;
+        window._ownerUid       = ud.role === 'agent' ? (ud.ownerUid || user.uid) : user.uid;
       } else {
-        // First-time login — default to owner
-        window._role           = 'owner';
-        window._agentName      = '';
-        window._assignedGroups = [];
-        window._ownerUid       = user.uid;
-        await setDoc(doc(db,'users',user.uid),{ role:'owner', createdAt:new Date().toISOString() });
+        // First-time login — create owner record in background, don't block app start
+        setDoc(doc(db,'users',user.uid),{ role:'owner', createdAt:new Date().toISOString() }).catch(()=>{});
       }
     } catch(e){
-      // Fallback if Firestore check fails
-      window._role = 'owner'; window._ownerUid = user.uid;
+      // Rules not set or network issue — proceed as owner using own uid
+      console.warn('Could not load user role, defaulting to owner:', e.message);
     }
     window._fbReady = true;
     window._startApp();
   } else {
-    window._fbReady = false;
-    window._fbUid   = null;
-    window._fbEmail = null;
-    window._role    = null;
+    window._fbReady  = false;
+    window._fbUid    = null;
+    window._fbEmail  = null;
+    window._role     = null;
     window._ownerUid = null;
     showAuthUI();
   }
