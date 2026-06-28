@@ -1073,11 +1073,10 @@ function render(){
 
 function renderSummaryRow(t){
   return `
-    <div class="summary-row">
-      <div class="stat"><div class="v mono">${state.customers.length}</div><div class="l">Customers</div></div>
-      <div class="stat"><div class="v mono">${fmtINR(t.outstanding)}</div><div class="l">Outstanding</div></div>
-      <div class="stat warn"><div class="v mono">${fmtINR(t.dueToday)}</div><div class="l">Due Today</div></div>
-      <div class="stat danger"><div class="v mono">${fmtINR(t.overdue)}</div><div class="l">Overdue</div></div>
+    <div class="summary-row" style="grid-template-columns:repeat(3,1fr);">
+      <div class="stat"><div class="v mono">${state.customers.length}</div><div class="l">${T('customers')}</div></div>
+      <div class="stat"><div class="v mono">${fmtINR(t.outstanding)}</div><div class="l">${T('outstanding')}</div></div>
+      <div class="stat warn"><div class="v mono">${fmtINR(t.dueToday)}</div><div class="l">${T('dueToday')}</div></div>
     </div>`;
 }
 
@@ -1125,12 +1124,7 @@ function renderDashboard(t){
     <div class="dash-stat-card" style="border-color:var(--amber);">
       <div class="ds-icon">💰</div>
       <div class="ds-val mono">${fmtINR(t.outstanding)}</div>
-      <div class="ds-lbl">Total Outstanding</div>
-    </div>
-    <div class="dash-stat-card" style="border-color:var(--maroon);">
-      <div class="ds-icon">⚠️</div>
-      <div class="ds-val mono" style="color:var(--maroon);">${fmtINR(t.overdue)}</div>
-      <div class="ds-lbl">Total Overdue</div>
+      <div class="ds-lbl">${T('totalOutstanding')}</div>
     </div>
   </div>
   <div class="cash-hero" onclick="setTab('accounts')" style="cursor:pointer; margin-bottom:12px;">
@@ -1432,7 +1426,7 @@ function renderCustomerCard(c){
       <span class="cust-code">${escapeHtml(c.code)}</span>
       <div class="cust-main">
         <div class="cust-name">${escapeHtml(c.name)} <span class="badge ${isActive?'ok':'done'}" style="margin-left:2px;">${isActive?'Active':'Inactive'}</span></div>
-        <div class="cust-sub">${loans.length} loan${loans.length!==1?'s':''} ${totalOverdue>0?`· <span style="color:var(--maroon)">${fmtINR(totalOverdue)} overdue</span>`:''}</div>
+        <div class="cust-sub">${loans.length} loan${loans.length!==1?'s':''}</div>
       </div>
       <span class="cust-flag" style="background:${flagColor}"></span>
       <span class="chev">${open?'▲':'▼'}</span>
