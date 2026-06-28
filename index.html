@@ -633,8 +633,35 @@ onAuthStateChanged(auth, async user => {
         window._assignedGroups = ud.assignedGroups || [];
         window._ownerUid       = ud.role === 'agent' ? (ud.ownerUid || user.uid) : user.uid;
       } else {
-        // First-time login — create owner record in background, don't block app start
-        setDoc(doc(db,'users',user.uid),{ role:'owner', createdAt:new Date().toISOString() }).catch(()=>{});
+        // No user doc — check if there's a pending agent invite for this email
+        const email = (user.email||'').toLowerCase();
+        const invKey = email.replace(/[^a-z0-9]/g,'_');
+        let isAgentInvite = false;
+        try{
+          const invSnap = await getDoc(doc(db,'invites',invKey));
+          if(invSnap.exists()){
+            const inv = invSnap.data();
+            // Write the agent's user doc
+            await setDoc(doc(db,'users',user.uid),{
+              role:'agent',
+              agentName: inv.agentName || email,
+              assignedGroups: inv.assignedGroups || [],
+              ownerUid: inv.ownerUid,
+              createdAt: new Date().toISOString()
+            });
+            window._role           = 'agent';
+            window._agentName      = inv.agentName || email;
+            window._assignedGroups = inv.assignedGroups || [];
+            window._ownerUid       = inv.ownerUid;
+            isAgentInvite = true;
+          }
+        } catch(invErr){
+          console.warn('Invite check failed:', invErr.message);
+        }
+        if(!isAgentInvite){
+          // First-time owner login — create owner record
+          setDoc(doc(db,'users',user.uid),{ role:'owner', createdAt:new Date().toISOString() }).catch(()=>{});
+        }
       }
     } catch(e){
       // Rules not set or network issue — proceed as owner using own uid
