@@ -397,6 +397,8 @@ import { getAuth, signInWithEmailAndPassword,
          RecaptchaVerifier, signInWithPhoneNumber,
          onAuthStateChanged, signOut }                  from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import { getFirestore, doc, getDoc, setDoc, deleteDoc } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { initializeApp as initializeApp2 }             from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { getAuth as getAuth2, createUserWithEmailAndPassword as createUser2 } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 
 const firebaseConfig = {
   apiKey:            "AIzaSyChjzv0auvtDbMh_uKHkorOxgb1Ss4WZQQ",
@@ -410,6 +412,10 @@ const firebaseConfig = {
 const app  = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db   = getFirestore(app);
+
+// Second app instance — used ONLY to create agent accounts without signing out owner
+const app2 = initializeApp2(firebaseConfig, 'secondary');
+const auth2 = getAuth2(app2);
 
 // No setPersistence — Firebase Auth persists sessions by default via IndexedDB
 
@@ -685,11 +691,11 @@ window._logout = async function(){
   location.reload();
 };
 
-// Create agent account + write their users doc in one shot (called by owner)
+// Create agent account + write their users doc — uses secondary app so owner stays signed in
 window._fbCreateAgent = async function(name, email, pass, assignedGroups){
-  // 1. Create the Firebase Auth account for the agent
-  const { user } = await createUserWithEmailAndPassword(auth, email, pass);
-  // 2. Immediately write their users doc so they load as agent on first login
+  // 1. Create agent account on secondary app instance (owner session untouched)
+  const { user } = await createUser2(auth2, email, pass);
+  // 2. Write their users doc immediately
   await setDoc(doc(db, 'users', user.uid), {
     role: 'agent',
     agentName: name,
@@ -697,7 +703,8 @@ window._fbCreateAgent = async function(name, email, pass, assignedGroups){
     ownerUid: window._fbUid,
     createdAt: new Date().toISOString()
   });
-  // 3. Sign back in as the owner (creating a new account signs you out)
+  // 3. Sign out of secondary app (cleanup)
+  await auth2.signOut();
   return user.uid;
 };
 </script>
@@ -892,7 +899,7 @@ async function saveData(){
     if(window._fbReady && (window._ownerUid||window._fbUid)){
       setSyncDot('syncing');
       try{
-        await window._apiSave(jsonStr, window._ownerUid || window._fbUid);
+        await window._apiSave(jsonStr, window._ownerUid);
         setSyncDot('ok');
       } catch(e){
         console.error('Firestore save error:', e.code, e.message);
@@ -2062,26 +2069,19 @@ async function saveNewAgent(){
   if(!pass || pass.length < 8){ showToast('Password must be at least 8 characters'); return; }
   if(!assignedGroups.length){ showToast('Assign at least one collection line'); return; }
 
-  const btn = document.querySelector('#agentModal .btn-primary') || document.querySelector('.btn-primary');
+  const btn = document.querySelector('.btn-primary');
   if(btn){ btn.textContent = 'Creating…'; btn.disabled = true; }
 
   try{
-    const ownerEmail = window._fbEmail;
-    const ownerUid   = window._fbUid;
-
-    // Create agent account + write their users/{uid} doc in one shot
+    // Create agent Firebase account + users doc without affecting owner session
     await window._fbCreateAgent(name, email, pass, assignedGroups);
 
-    // _fbCreateAgent signs us out — sign back in as owner silently
-    // The onAuthStateChanged will reload the app as owner
     if(!Array.isArray(state.agents)) state.agents = [];
     state.agents.push({ id:uid('agt'), name, email, assignedGroups, status:'active', createdAt:todayISO() });
-    // Save to localStorage immediately so it survives the re-auth reload
-    localStorage.setItem('fl_offline_data', JSON.stringify(state));
-
-    showToast(`Agent "${name}" created! Signing you back in…`);
-    // Trigger owner re-login — reloading is simplest; owner will re-auth via Firebase session
-    setTimeout(()=>location.reload(), 1200);
+    await saveData();
+    closeModal();
+    showToast(`✓ Agent "${name}" created — share the app link + email + password`);
+    render();
   } catch(e){
     const msg = e.code === 'auth/email-already-in-use' ? 'That email already has an account.'
               : e.code === 'auth/weak-password'        ? 'Password too weak — use 8+ characters.'
