@@ -940,9 +940,17 @@ function customerActive(custId){
   return customerLoans(custId).some(l=>!loanStatus(l).completed);
 }
 
+/* Returns loans visible to the current user (agent sees only assigned groups) */
+function visibleLoans(){
+  if(isOwner()) return state.loans;
+  const assigned = new Set(window._assignedGroups || []);
+  const custIds = new Set(state.customers.filter(c=>assigned.has(c.groupId)).map(c=>c.id));
+  return state.loans.filter(l=>custIds.has(l.customerId));
+}
+
 function allTotals(){
   let overdue=0, dueToday=0, outstanding=0, activeLoans=0;
-  state.loans.forEach(l=>{
+  visibleLoans().forEach(l=>{
     const s = loanStatus(l);
     overdue += s.overdue; dueToday += s.dueToday; outstanding += s.outstanding;
     if(!s.completed) activeLoans++;
@@ -980,7 +988,7 @@ function todayStats(){
   let unpaidAmt=0, unpaidItems=[];
   let profitAmt=0;
 
-  state.loans.forEach(l=>{
+  visibleLoans().forEach(l=>{
     // New loans given today
     if(l.startDate===today){
       loansGiven.push(l);
@@ -1015,7 +1023,7 @@ function monthlyStats(){
   let collectedAmt=0, profitAmt=0;
   let disbursedItems=[], collectionItems=[], expenseItems=[];
 
-  state.loans.forEach(l=>{
+  visibleLoans().forEach(l=>{
     if(l.startDate.startsWith(mp)){ loansGivenAmt+=l.principal; loansGivenCount++; disbursedItems.push(l); }
     (l.collections||[]).filter(col=>col.date.startsWith(mp)).forEach(col=>{
       collectedAmt += col.amount;
@@ -1072,9 +1080,12 @@ function render(){
 }
 
 function renderSummaryRow(t){
+  // Agents see only their assigned customer count
+  const custCount = isOwner() ? state.customers.length :
+    state.customers.filter(c=>(window._assignedGroups||[]).includes(c.groupId)).length;
   return `
     <div class="summary-row" style="grid-template-columns:repeat(3,1fr);">
-      <div class="stat"><div class="v mono">${state.customers.length}</div><div class="l">${T('customers')}</div></div>
+      <div class="stat"><div class="v mono">${custCount}</div><div class="l">${T('customers')}</div></div>
       <div class="stat"><div class="v mono">${fmtINR(t.outstanding)}</div><div class="l">${T('outstanding')}</div></div>
       <div class="stat warn"><div class="v mono">${fmtINR(t.dueToday)}</div><div class="l">${T('dueToday')}</div></div>
     </div>`;
@@ -1083,7 +1094,9 @@ function renderSummaryRow(t){
 function renderSearchResults(){
   if(!ui.searchQuery.trim()) return '';
   const q = ui.searchQuery.toLowerCase();
-  const hits = state.customers.filter(c =>
+  const searchable = isOwner() ? state.customers :
+    state.customers.filter(c=>(window._assignedGroups||[]).includes(c.groupId));
+  const hits = searchable.filter(c =>
     c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q) || (c.mobile||'').includes(q)
   ).slice(0,8);
   if(!hits.length) return `<div style="color:#F2ECDA; font-size:12px; padding:6px 2px;">No matches</div>`;
@@ -1096,7 +1109,83 @@ function renderSearchResults(){
   }).join('');
 }
 
+function renderAgentDashboard(t){
+  const assigned = window._assignedGroups || [];
+  const agentGroups = state.groups.filter(g=>assigned.includes(g.id));
+  const agentCustIds = new Set(state.customers.filter(c=>assigned.includes(c.groupId)).map(c=>c.id));
+  const agentCustomers = state.customers.filter(c=>agentCustIds.has(c.id));
+  const td = todayStats();
+  const today = todayISO();
+  const todayLabel = new Date(today+'T00:00:00').toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'});
+
+  if(agentGroups.length===0){
+    return `<div class="empty"><div class="big">📋</div>
+      <p>No lines assigned to you yet.<br>Ask your owner to assign you a collection line.</p></div>`;
+  }
+
+  let html = `<div class="section-title" style="margin-top:0;">📊 My Summary</div>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px;">
+    <div class="dash-stat-card" style="border-color:var(--navy);">
+      <div class="ds-icon">👥</div>
+      <div class="ds-val">${agentCustomers.length}</div>
+      <div class="ds-lbl">My Customers</div>
+    </div>
+    <div class="dash-stat-card" style="border-color:var(--amber);">
+      <div class="ds-icon">💰</div>
+      <div class="ds-val mono">${fmtINR(t.outstanding)}</div>
+      <div class="ds-lbl">Outstanding</div>
+    </div>
+  </div>`;
+
+  html += `<div class="section-title">📅 Today — ${todayLabel}</div>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px;">
+    <div class="dash-stat-card" style="border-color:var(--green);">
+      <div class="ds-icon">📥</div>
+      <div class="ds-val mono" style="color:var(--green);">${fmtINR(td.collectedAmt)}</div>
+      <div class="ds-lbl">Collected (${td.collectedItems.length})</div>
+    </div>
+    <div class="dash-stat-card" style="border-color:var(--maroon);">
+      <div class="ds-icon">🔴</div>
+      <div class="ds-val mono" style="color:var(--maroon);">${fmtINR(td.unpaidAmt)}</div>
+      <div class="ds-lbl">Unpaid (${td.unpaidItems.length})</div>
+    </div>
+  </div>`;
+
+  if(td.collectedItems.length){
+    html += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--ink-soft);margin-bottom:6px;">📥 Collections Today</div>`;
+    td.collectedItems.forEach(({l,c,col})=>{
+      const g=c?getGroup(c.groupId):null;
+      html += `<div class="detail-row"><span class="tag-dot" style="background:${g?g.color:'#999'}"></span><span class="dr-name">${c?escapeHtml(c.name):'?'}</span><span class="dr-sub">${col.note?escapeHtml(col.note):'EMI payment'}</span><span class="dr-amt green">+${fmtINR(col.amount)}</span></div>`;
+    });
+  }
+  if(td.unpaidItems.length){
+    html += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:var(--maroon);margin:10px 0 6px;">🔴 Unpaid Today</div>`;
+    td.unpaidItems.forEach(({l,c,s})=>{
+      const g=c?getGroup(c.groupId):null;
+      html += `<div class="detail-row" onclick="jumpToCustomer('${c?c.id:''}')" style="cursor:pointer;"><span class="tag-dot" style="background:${g?g.color:'#999'}"></span><span class="dr-name">${c?escapeHtml(c.name):'?'}</span><span class="dr-sub">${c?escapeHtml(c.mobile||''):''}</span><span class="dr-amt red">${fmtINR(s.dueToday)}</span></div>`;
+    });
+  }
+  if(!td.collectedItems.length && !td.unpaidItems.length){
+    html += `<div class="card ok" style="text-align:center; color:var(--green);">✓ All clear — nothing unpaid today.</div>`;
+  }
+
+  html += `<div class="section-title" style="margin-top:18px;">🗂 My Lines</div>`;
+  agentGroups.forEach(g=>{
+    const custs = state.customers.filter(c=>c.groupId===g.id);
+    html += `<div class="card" style="border-left-color:${g.color}; cursor:pointer;" onclick="setTab('${g.id}')">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div><b>${escapeHtml(g.name)}</b> <span style="font-size:11px;color:var(--ink-soft);">${custs.length} customers</span></div>
+        <span style="color:var(--primary);font-size:13px;">View →</span>
+      </div>
+    </div>`;
+  });
+  return html;
+}
+
 function renderDashboard(t){
+  // Agents get a restricted view — only their assigned tabs
+  if(isAgent()) return renderAgentDashboard(t);
+
   if(state.customers.length===0){
     return `<div class="empty"><div class="big">📒</div>
       <p>${T("ledgerEmpty")}<br>${T("createTab")}</p></div>`;
@@ -1748,6 +1837,7 @@ function settingsForm(){
         : `<button class="btn btn-ghost btn-block" style="margin-bottom:8px;" onclick="window._logout && window._logout()">Sign Out</button>`}
     </div>
 
+    ${isOwner() ? `
     <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">
       <div class="section-title" style="margin-top:0;">${T('backup')}</div>
       <button class="btn btn-ghost btn-block" style="margin-bottom:8px;" onclick="downloadBackup()">${T('download')}</button>
@@ -1757,11 +1847,10 @@ function settingsForm(){
         ⚠️ Restoring a backup will <b>replace all current data</b>.
       </div>
     </div>
-
     <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">
       <div class="section-title" style="margin-top:0; color:var(--red);">${T('danger')}</div>
       <button class="btn btn-danger btn-block" onclick="confirmWipeAll()">${T('wipeAll')}</button>
-    </div>
+    </div>` : ''}
 
     ${isOwner() ? `
     <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">
