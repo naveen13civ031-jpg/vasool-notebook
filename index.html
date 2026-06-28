@@ -685,9 +685,20 @@ window._logout = async function(){
   location.reload();
 };
 
-// Expose invite saver for agent management
-window._fbSaveInvite = async function(invKey, data){
-  await setDoc(doc(db,'invites',invKey), data);
+// Create agent account + write their users doc in one shot (called by owner)
+window._fbCreateAgent = async function(name, email, pass, assignedGroups){
+  // 1. Create the Firebase Auth account for the agent
+  const { user } = await createUserWithEmailAndPassword(auth, email, pass);
+  // 2. Immediately write their users doc so they load as agent on first login
+  await setDoc(doc(db, 'users', user.uid), {
+    role: 'agent',
+    agentName: name,
+    assignedGroups: assignedGroups,
+    ownerUid: window._fbUid,
+    createdAt: new Date().toISOString()
+  });
+  // 3. Sign back in as the owner (creating a new account signs you out)
+  return user.uid;
 };
 </script>
 
@@ -823,7 +834,7 @@ async function loadData(){
     if(window._fbReady && (window._ownerUid||window._fbUid)){
       setSyncDot('syncing');
       try{
-        raw = await window._apiLoad(window._ownerUid || window._fbUid);
+        raw = await window._apiLoad(window._ownerUid);
         setSyncDot('ok');
         if(raw) localStorage.setItem(LS_KEY, raw);
         else {
@@ -2051,28 +2062,32 @@ async function saveNewAgent(){
   if(!pass || pass.length < 8){ showToast('Password must be at least 8 characters'); return; }
   if(!assignedGroups.length){ showToast('Assign at least one collection line'); return; }
 
+  const btn = document.querySelector('#agentModal .btn-primary') || document.querySelector('.btn-primary');
+  if(btn){ btn.textContent = 'Creating…'; btn.disabled = true; }
+
   try{
-    // Save invite to Firestore so when agent registers, role is auto-assigned
-    const invKey = email.replace(/[^a-z0-9]/g,'_');
-    // Use window._fbApiSaveInvite exposed from auth module
-    if(window._fbSaveInvite){
-      await window._fbSaveInvite(invKey, {
-        ownerUid: window._fbUid,
-        agentName: name,
-        assignedGroups,
-        email,
-        createdAt: new Date().toISOString()
-      });
-    }
-    // Save agent record in state
+    const ownerEmail = window._fbEmail;
+    const ownerUid   = window._fbUid;
+
+    // Create agent account + write their users/{uid} doc in one shot
+    await window._fbCreateAgent(name, email, pass, assignedGroups);
+
+    // _fbCreateAgent signs us out — sign back in as owner silently
+    // The onAuthStateChanged will reload the app as owner
     if(!Array.isArray(state.agents)) state.agents = [];
-    state.agents.push({ id:uid('agt'), name, email, assignedGroups, status:'pending', createdAt:todayISO() });
-    await saveData();
-    closeModal();
-    showToast(`Agent "${name}" added — share app link + email + password with them`);
-    render();
+    state.agents.push({ id:uid('agt'), name, email, assignedGroups, status:'active', createdAt:todayISO() });
+    // Save to localStorage immediately so it survives the re-auth reload
+    localStorage.setItem('fl_offline_data', JSON.stringify(state));
+
+    showToast(`Agent "${name}" created! Signing you back in…`);
+    // Trigger owner re-login — reloading is simplest; owner will re-auth via Firebase session
+    setTimeout(()=>location.reload(), 1200);
   } catch(e){
-    showToast('Error adding agent: ' + (e.message||'try again'));
+    const msg = e.code === 'auth/email-already-in-use' ? 'That email already has an account.'
+              : e.code === 'auth/weak-password'        ? 'Password too weak — use 8+ characters.'
+              : (e.message || 'Error creating agent');
+    showToast(msg);
+    if(btn){ btn.textContent = 'Add Agent'; btn.disabled = false; }
   }
 }
 
