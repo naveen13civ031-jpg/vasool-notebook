@@ -907,7 +907,9 @@ async function saveData(){
   // Debounce API save
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(async () => {
-    if(window._fbReady && (window._ownerUid||window._fbUid)){
+    if(window._fbReady && window._ownerUid){
+      // Agents don't write to Firestore — only owner saves
+      if(isAgent()) return;
       setSyncDot('syncing');
       try{
         await window._apiSave(jsonStr, window._ownerUid);
