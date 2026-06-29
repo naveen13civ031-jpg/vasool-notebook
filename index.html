@@ -843,12 +843,20 @@ async function loadData(){
     if(window._fbReady && (window._ownerUid||window._fbUid)){
       setSyncDot('syncing');
       try{
+        // Always load from Firestore first — never use local cache as primary source
         raw = await window._apiLoad(window._ownerUid);
         setSyncDot('ok');
-        if(raw) localStorage.setItem(LS_KEY, raw);
-        else {
-          raw = localStorage.getItem(LS_KEY);
-          if(raw){ await window._apiSave(raw, window._ownerUid || window._fbUid); setSyncDot('ok'); }
+        if(raw){
+          // Firestore is authoritative — update local cache
+          localStorage.setItem(LS_KEY, raw);
+        } else {
+          // Nothing in Firestore yet — push local cache up
+          const local = localStorage.getItem(LS_KEY);
+          if(local){
+            raw = local;
+            await window._apiSave(raw, window._ownerUid);
+            setSyncDot('ok');
+          }
         }
       } catch(e){
         console.warn('Firestore load failed, using local cache:', e.message);
