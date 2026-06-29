@@ -431,20 +431,11 @@ window._apiLoad = async function(ownerUid){
 };
 window._apiSave = async function(jsonStr, ownerUid){
   if(!ownerUid) throw new Error('Not logged in');
-  // Owner saves to their own ledger; agent also saves to owner's ledger
   await setDoc(doc(db, 'ledgers', ownerUid), {
     data: jsonStr,
     updatedAt: new Date().toISOString(),
     uid: ownerUid
   });
-  // Also mirror to agent's own ledger so they can read it without special rules
-  if(window._fbUid && window._fbUid !== ownerUid){
-    await setDoc(doc(db, 'ledgers', window._fbUid), {
-      data: jsonStr,
-      updatedAt: new Date().toISOString(),
-      uid: ownerUid
-    }).catch(()=>{});
-  }
 };
 
 // ── reCAPTCHA for phone auth ──
@@ -852,7 +843,7 @@ async function loadData(){
     if(window._fbReady && (window._ownerUid||window._fbUid)){
       setSyncDot('syncing');
       try{
-        raw = await window._apiLoad(isAgent() ? window._fbUid : window._ownerUid);
+        raw = await window._apiLoad(window._ownerUid);
         setSyncDot('ok');
         if(raw) localStorage.setItem(LS_KEY, raw);
         else {
@@ -908,10 +899,9 @@ async function saveData(){
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(async () => {
     if(window._fbReady && window._ownerUid){
-      // Agents don't write to Firestore — only owner saves
-      if(isAgent()) return;
       setSyncDot('syncing');
       try{
+        // Both owner and agent save to owner's ledger
         await window._apiSave(jsonStr, window._ownerUid);
         setSyncDot('ok');
       } catch(e){
