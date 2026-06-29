@@ -420,20 +420,31 @@ const auth2 = getAuth2(app2);
 // No setPersistence — Firebase Auth persists sessions by default via IndexedDB
 
 // ── Firestore helpers (uid passed explicitly — never rely on auth.currentUser timing) ──
-window._apiLoad = async function(uid){
-  if(!uid) throw new Error('Not logged in');
-  const snap = await getDoc(doc(db, 'ledgers', uid));
+window._apiLoad = async function(ownerUid){
+  if(!ownerUid) throw new Error('Not logged in');
+  // Always load from owner's ledger — but use agent's own UID as fallback read path
+  const loadUid = ownerUid;
+  const snap = await getDoc(doc(db, 'ledgers', loadUid));
   if(!snap.exists()) return null;
   const raw = snap.data().data;
   return typeof raw === 'string' ? raw : JSON.stringify(raw);
 };
-window._apiSave = async function(jsonStr, uid){
-  if(!uid) throw new Error('Not logged in');
-  await setDoc(doc(db, 'ledgers', uid), {
+window._apiSave = async function(jsonStr, ownerUid){
+  if(!ownerUid) throw new Error('Not logged in');
+  // Owner saves to their own ledger; agent also saves to owner's ledger
+  await setDoc(doc(db, 'ledgers', ownerUid), {
     data: jsonStr,
     updatedAt: new Date().toISOString(),
-    uid: uid
+    uid: ownerUid
   });
+  // Also mirror to agent's own ledger so they can read it without special rules
+  if(window._fbUid && window._fbUid !== ownerUid){
+    await setDoc(doc(db, 'ledgers', window._fbUid), {
+      data: jsonStr,
+      updatedAt: new Date().toISOString(),
+      uid: ownerUid
+    }).catch(()=>{});
+  }
 };
 
 // ── reCAPTCHA for phone auth ──
@@ -841,7 +852,7 @@ async function loadData(){
     if(window._fbReady && (window._ownerUid||window._fbUid)){
       setSyncDot('syncing');
       try{
-        raw = await window._apiLoad(window._ownerUid);
+        raw = await window._apiLoad(isAgent() ? window._fbUid : window._ownerUid);
         setSyncDot('ok');
         if(raw) localStorage.setItem(LS_KEY, raw);
         else {
