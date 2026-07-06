@@ -1523,7 +1523,7 @@ function customerForm(existing, groupId){
       <img id="custPhotoPreview" src="${photoSrc}" style="${photoSrc?'':'display:none;'}">
       <div id="custPhotoPlaceholder" class="photo-placeholder" style="${photoSrc?'display:none;':''}">👤</div>
       <label class="btn btn-ghost btn-sm" for="f_custPhoto">📷 ${photoSrc?'Change Photo':'Add Photo'}</label>
-      <input type="file" id="f_custPhoto" accept="image/*" capture="environment" style="display:none;" onchange="onCustomerPhotoPicked(event)">
+      <input type="file" id="f_custPhoto" accept="image/*" style="display:none;" onchange="onCustomerPhotoPicked(event)">
       ${photoSrc?'<button type="button" class="btn btn-ghost btn-sm" onclick="removeCustomerPhoto()">🗑 Remove</button>':''}
     </div>
     <div class="field"><label>Customer name</label><input id="f_custName" value="${existing?escapeAttr(existing.name):''}" placeholder="Full name"></div>
