@@ -240,6 +240,13 @@
   .cash-chip{font-size:10.5px; padding:3px 8px; border-radius:20px; background:var(--paper-deep); color:var(--ink-soft); font-family:'IBM Plex Mono';}
   .cash-chip.pos{color:var(--green);}
   .cash-chip.neg{color:var(--maroon);}
+  .reinvest-card{background:var(--card); border-radius:var(--radius); padding:12px 14px; margin-bottom:12px; box-shadow:var(--shadow); border-left:4px solid var(--navy); display:flex; gap:10px;}
+  .reinvest-col{flex:1; text-align:center;}
+  .reinvest-col .lbl{font-size:10px; text-transform:uppercase; letter-spacing:0.4px; color:var(--ink-soft); font-weight:600;}
+  .reinvest-col .amt{font-family:'IBM Plex Mono'; font-size:17px; font-weight:600; margin-top:3px;}
+  .reinvest-col.reinvest .amt{color:var(--navy);}
+  .reinvest-col.profit .amt{color:var(--green);}
+  .reinvest-divider{width:1px; background:var(--rule);}
 
   .quick-row{display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:16px;}
   .quick-btn{background:var(--card); border:1.5px solid var(--rule); border-radius:10px; padding:12px 6px; text-align:center; cursor:pointer; box-shadow:var(--shadow);}
@@ -812,6 +819,24 @@ function cashInHand(){
   const lc = loanCashTotals();
   return tx.invested - tx.withdrawn - tx.expenses - lc.disbursed + lc.collected;
 }
+function reinvestTotals(){
+  const tx = txTotals();
+  const lc = loanCashTotals();
+  let totalInterestCollected = 0;
+  state.loans.forEach(l=>{
+    const totalInterest = l.principal * (l.rate/100);
+    const totalPayable = l.payments.reduce((s,p)=>s+p.amount,0);
+    const ratio = totalPayable > 0 ? totalInterest/totalPayable : 0;
+    const collectedForLoan = (l.collections||[]).reduce((s,c)=>s+c.amount,0);
+    totalInterestCollected += collectedForLoan * ratio;
+  });
+  const totalPrincipalCollected = lc.collected - totalInterestCollected;
+  const reinvested = Math.min(lc.collected, Math.max(0, lc.disbursed - tx.invested));
+  const principalUsedForReinvestment = Math.min(reinvested, totalPrincipalCollected);
+  const interestUsedForReinvestment = reinvested - principalUsedForReinvestment;
+  const profitInHand = totalInterestCollected - interestUsedForReinvestment;
+  return {reinvested, profitInHand};
+}
 
 function todayStats(){
   const today = todayISO();
@@ -1205,6 +1230,7 @@ function renderAccounts(){
   const tx = txTotals();
   const lc = loanCashTotals();
   const cash = cashInHand();
+  const rt = reinvestTotals();
   let html = `<div class="cash-hero">
     <div class="lbl">Cash in Hand</div>
     <div class="amt">${fmtINR(cash)}</div>
@@ -1214,6 +1240,18 @@ function renderAccounts(){
       <span class="cash-chip neg">− ${fmtINR(lc.disbursed)} disbursed</span>
       <span class="cash-chip neg">− ${fmtINR(tx.withdrawn)} withdrawn</span>
       <span class="cash-chip neg">− ${fmtINR(tx.expenses)} expenses</span>
+    </div>
+  </div>
+
+  <div class="reinvest-card">
+    <div class="reinvest-col reinvest">
+      <div class="lbl">🔁 Reinvested</div>
+      <div class="amt">${fmtINR(rt.reinvested)}</div>
+    </div>
+    <div class="reinvest-divider"></div>
+    <div class="reinvest-col profit">
+      <div class="lbl">💵 Profit in Hand</div>
+      <div class="amt">${fmtINR(rt.profitInHand)}</div>
     </div>
   </div>
 
