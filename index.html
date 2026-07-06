@@ -996,7 +996,7 @@ function render(){
         <button class="icon-btn" onclick="openSettings()">⚙️</button>
       </div>
       <div class="search-bar ${ui.searchOpen?'':'hidden'}" style="${ui.searchOpen?'':'display:none'}">
-        <input id="searchInput" placeholder="Search name, code or mobile…" value="${escapeAttr(ui.searchQuery)}" oninput="onSearch(this.value)">
+        <input id="searchInput" placeholder="Search name, code, mobile or area…" value="${escapeAttr(ui.searchQuery)}" oninput="onSearch(this.value)">
         <div id="searchResults">${renderSearchResults()}</div>
       </div>
       ${ui.searchOpen ? '' : renderSummaryRow(t)}
@@ -1029,13 +1029,13 @@ function renderSearchResults(){
   if(!ui.searchQuery.trim()) return '';
   const q = ui.searchQuery.toLowerCase();
   const hits = state.customers.filter(c =>
-    c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q) || (c.mobile||'').includes(q)
+    c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q) || (c.mobile||'').includes(q) || (c.area||'').toLowerCase().includes(q)
   ).slice(0,8);
   if(!hits.length) return `<div style="color:#F2ECDA; font-size:12px; padding:6px 2px;">No matches</div>`;
   return hits.map(c=>{
     const g = getGroup(c.groupId);
     return `<div class="search-hit" onclick="jumpToCustomer('${c.id}')">
-      <span><span class="tag-dot" style="background:${g?g.color:'#999'}"></span><b>${escapeHtml(c.name)}</b> · ${escapeHtml(c.code)}</span>
+      <span><span class="tag-dot" style="background:${g?g.color:'#999'}"></span><b>${escapeHtml(c.name)}</b> · ${escapeHtml(c.code)}${c.area?` · ${escapeHtml(c.area)}`:''}</span>
       <span style="color:#888;">${escapeHtml(c.mobile||'')}</span>
     </div>`;
   }).join('');
