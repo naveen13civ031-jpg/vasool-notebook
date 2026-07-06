@@ -374,7 +374,6 @@ import { getAuth, signInWithEmailAndPassword,
          RecaptchaVerifier, signInWithPhoneNumber,
          onAuthStateChanged, signOut }                  from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import { getFirestore, doc, getDoc, setDoc }            from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-import { getStorage, ref, uploadString, getDownloadURL } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js';
 
 const firebaseConfig = {
   apiKey:            "AIzaSyChjzv0auvtDbMh_uKHkorOxgb1Ss4WZQQ",
@@ -388,7 +387,6 @@ const firebaseConfig = {
 const app     = initializeApp(firebaseConfig);
 const auth    = getAuth(app);
 const db      = getFirestore(app);
-const storage = getStorage(app);
 
 // No setPersistence — Firebase Auth persists sessions by default via IndexedDB
 
@@ -407,13 +405,6 @@ window._apiSave = async function(jsonStr, uid){
     updatedAt: new Date().toISOString(),
     uid: uid
   });
-};
-window._uploadCustomerPhoto = async function(dataUrl, uid, custId){
-  if(!uid) throw new Error('Not logged in');
-  const path = `customer-photos/${uid}/${custId}.jpg`;
-  const storageRef = ref(storage, path);
-  await uploadString(storageRef, dataUrl, 'data_url');
-  return await getDownloadURL(storageRef);
 };
 
 // ── reCAPTCHA for phone auth ──
@@ -1560,7 +1551,7 @@ function onCustomerPhotoPicked(e){
   if(!file) return;
   const reader = new FileReader();
   reader.onload = ()=>{
-    compressImage(reader.result, 480, 0.7, (compressedDataUrl)=>{
+    compressImage(reader.result, 200, 0.5, (compressedDataUrl)=>{
       ui.pendingPhoto = compressedDataUrl;
       const preview = document.getElementById('custPhotoPreview');
       const placeholder = document.getElementById('custPhotoPlaceholder');
@@ -1604,12 +1595,7 @@ async function saveCustomer(existingId, groupId){
   if(ui.pendingPhoto === 'REMOVE'){
     photo = null;
   } else if(ui.pendingPhoto){
-    try{
-      showToast('Uploading photo…');
-      photo = await window._uploadCustomerPhoto(ui.pendingPhoto, window._fbUid, custId);
-    }catch(err){
-      showToast('Photo upload failed — saved without photo');
-    }
+    photo = ui.pendingPhoto; // compressed base64 data URL, stored inline in Firestore
   }
   ui.pendingPhoto = null;
   if(existingId){
