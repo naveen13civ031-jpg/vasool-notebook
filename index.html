@@ -138,6 +138,11 @@
   .cust-meta{font-size:12px; color:var(--ink-soft); padding:10px 0 4px; line-height:1.7;}
   .cust-meta b{color:var(--ink);}
   .cust-actions{display:flex; gap:8px; margin:8px 0 4px;}
+  .cust-avatar{width:38px; height:38px; border-radius:50%; object-fit:cover; flex-shrink:0; border:1.5px solid var(--rule);}
+  .cust-avatar-lg{width:64px; height:64px; border-radius:50%; object-fit:cover; border:2px solid var(--rule); flex-shrink:0;}
+  .photo-picker{display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap;}
+  .photo-picker img{width:64px; height:64px; border-radius:50%; object-fit:cover; border:2px solid var(--rule);}
+  .photo-placeholder{width:64px; height:64px; border-radius:50%; background:var(--paper-deep); display:flex; align-items:center; justify-content:center; font-size:26px; border:2px solid var(--rule);}
 
   .loan-card{
     background:var(--paper); border-radius:8px; padding:10px 12px; margin-top:8px; border:1px solid var(--rule);
@@ -369,6 +374,7 @@ import { getAuth, signInWithEmailAndPassword,
          RecaptchaVerifier, signInWithPhoneNumber,
          onAuthStateChanged, signOut }                  from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import { getFirestore, doc, getDoc, setDoc }            from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { getStorage, ref, uploadString, getDownloadURL } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js';
 
 const firebaseConfig = {
   apiKey:            "AIzaSyChjzv0auvtDbMh_uKHkorOxgb1Ss4WZQQ",
@@ -379,9 +385,10 @@ const firebaseConfig = {
   appId:             "1:15704106986:web:99e49d03c4d1bdfb49b493"
 };
 
-const app  = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db   = getFirestore(app);
+const app     = initializeApp(firebaseConfig);
+const auth    = getAuth(app);
+const db      = getFirestore(app);
+const storage = getStorage(app);
 
 // No setPersistence — Firebase Auth persists sessions by default via IndexedDB
 
@@ -400,6 +407,13 @@ window._apiSave = async function(jsonStr, uid){
     updatedAt: new Date().toISOString(),
     uid: uid
   });
+};
+window._uploadCustomerPhoto = async function(dataUrl, uid, custId){
+  if(!uid) throw new Error('Not logged in');
+  const path = `customer-photos/${uid}/${custId}.jpg`;
+  const storageRef = ref(storage, path);
+  await uploadString(storageRef, dataUrl, 'data_url');
+  return await getDownloadURL(storageRef);
 };
 
 // ── reCAPTCHA for phone auth ──
@@ -1368,6 +1382,7 @@ function renderCustomerCard(c){
 
   return `<div class="cust-card">
     <div class="cust-head" onclick="toggleCustomer('${c.id}')">
+      ${c.photo?`<img class="cust-avatar" src="${c.photo}">`:''}
       <span class="cust-code">${escapeHtml(c.code)}</span>
       <div class="cust-main">
         <div class="cust-name">${escapeHtml(c.name)} <span class="badge ${isActive?'ok':'done'}" style="margin-left:2px;">${isActive?'Active':'Inactive'}</span></div>
@@ -1510,8 +1525,16 @@ function suggestCode(groupId){
 function customerForm(existing, groupId){
   const gid = existing ? existing.groupId : groupId;
   const others = state.customers.filter(c=>!existing || c.id!==existing.id);
+  const photoSrc = ui.pendingPhoto || (existing && existing.photo) || '';
   return `<div class="sheet-handle"></div>
     <h2>${existing?'Edit Customer':'Add Customer'}</h2>
+    <div class="photo-picker">
+      <img id="custPhotoPreview" src="${photoSrc}" style="${photoSrc?'':'display:none;'}">
+      <div id="custPhotoPlaceholder" class="photo-placeholder" style="${photoSrc?'display:none;':''}">👤</div>
+      <label class="btn btn-ghost btn-sm" for="f_custPhoto">📷 ${photoSrc?'Change Photo':'Add Photo'}</label>
+      <input type="file" id="f_custPhoto" accept="image/*" capture="environment" style="display:none;" onchange="onCustomerPhotoPicked(event)">
+      ${photoSrc?'<button type="button" class="btn btn-ghost btn-sm" onclick="removeCustomerPhoto()">🗑 Remove</button>':''}
+    </div>
     <div class="field"><label>Customer name</label><input id="f_custName" value="${existing?escapeAttr(existing.name):''}" placeholder="Full name"></div>
     <div class="row2">
       <div class="field"><label>Customer code</label><input id="f_custCode" value="${existing?escapeAttr(existing.code):suggestCode(gid)}"></div>
@@ -1532,6 +1555,41 @@ function customerForm(existing, groupId){
       <button class="btn btn-primary" onclick="saveCustomer('${existing?existing.id:''}','${gid}')">Save Customer</button>
     </div>`;
 }
+function onCustomerPhotoPicked(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    compressImage(reader.result, 480, 0.7, (compressedDataUrl)=>{
+      ui.pendingPhoto = compressedDataUrl;
+      const preview = document.getElementById('custPhotoPreview');
+      const placeholder = document.getElementById('custPhotoPlaceholder');
+      if(preview){ preview.src = compressedDataUrl; preview.style.display='block'; }
+      if(placeholder) placeholder.style.display='none';
+    });
+  };
+  reader.readAsDataURL(file);
+}
+function removeCustomerPhoto(){
+  ui.pendingPhoto = 'REMOVE';
+  const preview = document.getElementById('custPhotoPreview');
+  const placeholder = document.getElementById('custPhotoPlaceholder');
+  if(preview) preview.style.display='none';
+  if(placeholder) placeholder.style.display='flex';
+}
+function compressImage(dataUrl, maxDim, quality, cb){
+  const img = new Image();
+  img.onload = ()=>{
+    let w = img.width, h = img.height;
+    if(w>h){ if(w>maxDim){ h = Math.round(h*maxDim/w); w = maxDim; } }
+    else { if(h>maxDim){ w = Math.round(w*maxDim/h); h = maxDim; } }
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    cb(canvas.toDataURL('image/jpeg', quality));
+  };
+  img.src = dataUrl;
+}
 async function saveCustomer(existingId, groupId){
   const name = document.getElementById('f_custName').value.trim();
   const code = document.getElementById('f_custCode').value.trim();
@@ -1541,11 +1599,24 @@ async function saveCustomer(existingId, groupId){
   const referral = document.getElementById('f_custReferral').value || null;
   if(!name){ showToast('Enter customer name'); return; }
   if(!code){ showToast('Enter a customer code'); return; }
+  const custId = existingId || uid('cus');
+  let photo = existingId ? (getCustomer(existingId).photo || null) : null;
+  if(ui.pendingPhoto === 'REMOVE'){
+    photo = null;
+  } else if(ui.pendingPhoto){
+    try{
+      showToast('Uploading photo…');
+      photo = await window._uploadCustomerPhoto(ui.pendingPhoto, window._fbUid, custId);
+    }catch(err){
+      showToast('Photo upload failed — saved without photo');
+    }
+  }
+  ui.pendingPhoto = null;
   if(existingId){
     const c = getCustomer(existingId);
-    Object.assign(c, {name,code,mobile,area,joinDate,referral});
+    Object.assign(c, {name,code,mobile,area,joinDate,referral,photo});
   } else {
-    state.customers.push({id:uid('cus'), name,code,mobile,area,joinDate,referral, groupId});
+    state.customers.push({id:custId, name,code,mobile,area,joinDate,referral, groupId, photo});
   }
   await saveData();
   closeModal();
@@ -1846,8 +1917,8 @@ function onFab(){
   else { openAddCustomer(ui.activeTab); }
 }
 function openAddGroup(){ ui.modal={type:'addGroup'}; render(); }
-function openAddCustomer(groupId){ ui.modal={type:'addCustomer', payload:{groupId}}; render(); }
-function openEditCustomer(custId){ ui.modal={type:'editCustomer', payload:getCustomer(custId)}; render(); }
+function openAddCustomer(groupId){ ui.pendingPhoto=null; ui.modal={type:'addCustomer', payload:{groupId}}; render(); }
+function openEditCustomer(custId){ ui.pendingPhoto=null; ui.modal={type:'editCustomer', payload:getCustomer(custId)}; render(); }
 function openAddLoan(custId){ ui.modal={type:'addLoan', payload:{customerId:custId}}; render(); }
 function openAddTransaction(type){ ui.modal={type:'addTransaction', payload:{type}}; render(); }
 function openSettings(){ ui.modal={type:'settings'}; render(); }
