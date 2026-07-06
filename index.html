@@ -617,7 +617,7 @@ const STORAGE_KEY = 'lending-app-data';
 const COLORS = ['#1B2A4A','#8B2E2E','#2F5233','#C49A3C','#5B4B8A','#1F6E6E'];
 
 let state = null;
-let ui = { activeTab:'dashboard', expandedCustomerId:null, searchOpen:false, searchQuery:'', modal:null, custFilter:'all' };
+let ui = { activeTab:'dashboard', expandedCustomerId:null, searchOpen:false, searchQuery:'', modal:null, custFilter:'all', chartPeriod:'monthly' };
 
 function uid(p){ return p+'_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
@@ -695,6 +695,10 @@ async function loadData(){
   state.loans.forEach(l=>{
     if(!Array.isArray(l.collections)){
       l.collections = (l.payments||[]).filter(p=>p.paid).map(p=>({id:uid('col'), date:p.paidDate||p.dueDate, amount:p.amount, note:null}));
+      migrated = true;
+    }
+    if(!Array.isArray(l.skips)){
+      l.skips = [];
       migrated = true;
     }
   });
@@ -871,6 +875,76 @@ function monthlyStats(){
   return {loansGivenAmt, loansGivenCount, collectedAmt, profitAmt, monthInvested, monthWithdrawn, monthExpenses, netProfit, disbursedItems, collectionItems, expenseItems};
 }
 
+/* ---------------- Trend comparison helpers ---------------- */
+function periodStats(startISO, endISO){
+  let loansGivenAmt=0, collectedAmt=0, profitAmt=0;
+  state.loans.forEach(l=>{
+    if(l.startDate>=startISO && l.startDate<=endISO) loansGivenAmt += l.principal;
+    (l.collections||[]).forEach(col=>{
+      if(col.date>=startISO && col.date<=endISO){
+        collectedAmt += col.amount;
+        const totalInterest = l.principal*(l.rate/100);
+        const totalPayable = l.payments.reduce((s,p)=>s+p.amount,0);
+        const ratio = totalPayable>0 ? totalInterest/totalPayable : 0;
+        profitAmt += col.amount*ratio;
+      }
+    });
+  });
+  return {loansGivenAmt, collectedAmt, profitAmt};
+}
+function addDaysISO(iso, n){
+  const d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10);
+}
+function weeklyComparison(){
+  const today = todayISO();
+  const thisStart = addDaysISO(today,-6), thisEnd = today;
+  const lastStart = addDaysISO(today,-13), lastEnd = addDaysISO(today,-7);
+  return { current: periodStats(thisStart, thisEnd), previous: periodStats(lastStart, lastEnd), currentLabel:'This Week', previousLabel:'Last Week' };
+}
+function monthlyComparison(){
+  const today = todayISO();
+  const mp = today.slice(0,7);
+  const [y,m] = mp.split('-').map(Number);
+  const prevDate = new Date(y, m-2, 1);
+  const prevMp = prevDate.toISOString().slice(0,7);
+  const monthStart = mp+'-01', monthEnd = mp+'-31';
+  const prevStart = prevMp+'-01', prevEnd = prevMp+'-31';
+  const curLabel = new Date(mp+'-01T00:00:00').toLocaleDateString('en-IN',{month:'short',year:'numeric'});
+  const prevLabel = new Date(prevMp+'-01T00:00:00').toLocaleDateString('en-IN',{month:'short',year:'numeric'});
+  return { current: periodStats(monthStart, monthEnd), previous: periodStats(prevStart, prevEnd), currentLabel:curLabel, previousLabel:prevLabel };
+}
+function fmtCompact(n){
+  if(n>=100000) return '₹'+(n/100000).toFixed(1)+'L';
+  if(n>=1000) return '₹'+(n/1000).toFixed(1)+'k';
+  return '₹'+Math.round(n);
+}
+function renderComparisonChart(comp){
+  const metrics = [
+    {key:'loansGivenAmt', label:'Given', color:'#1B2A4A'},
+    {key:'collectedAmt', label:'Collected', color:'#2F5233'},
+    {key:'profitAmt', label:'Profit', color:'#A8650F'}
+  ];
+  const maxVal = Math.max(1, ...metrics.map(m=>Math.max(comp.current[m.key], comp.previous[m.key])));
+  const barW = 26, gap = 4, groupGap = 30, baseY = 110, chartTop = 14;
+  let x = 20, bars = '', labels = '';
+  metrics.forEach(m=>{
+    const curH = Math.round((comp.current[m.key]/maxVal)*(baseY-chartTop));
+    const prevH = Math.round((comp.previous[m.key]/maxVal)*(baseY-chartTop));
+    const curX = x, prevX = x+barW+gap;
+    bars += `<rect x="${prevX}" y="${baseY-prevH}" width="${barW}" height="${Math.max(prevH,1)}" fill="${m.color}" opacity="0.35" rx="3"/>`;
+    bars += `<rect x="${curX}" y="${baseY-curH}" width="${barW}" height="${Math.max(curH,1)}" fill="${m.color}" rx="3"/>`;
+    bars += `<text x="${curX+barW/2+2}" y="${Math.max(baseY-curH-4,10)}" font-size="8.5" fill="${m.color}" text-anchor="middle" font-family="IBM Plex Mono">${fmtCompact(comp.current[m.key])}</text>`;
+    labels += `<text x="${x+barW+gap/2}" y="126" font-size="9.5" fill="#6B6450" text-anchor="middle" font-family="Inter">${m.label}</text>`;
+    x += barW*2+gap+groupGap;
+  });
+  return `<svg viewBox="0 0 ${x} 140" style="width:100%; height:150px;">
+    <line x1="10" y1="${baseY}" x2="${x-10}" y2="${baseY}" stroke="#D8CCA3" stroke-width="1"/>
+    ${bars}
+    ${labels}
+  </svg>`;
+}
+function setChartPeriod(p){ ui.chartPeriod = p; render(); }
+
 /* ---------------- Render ---------------- */
 function render(){
   const app = document.getElementById('app');
@@ -1019,7 +1093,7 @@ function renderDashboard(t){
   }
 
   /* ---- Today export button ---- */
-  html += `<button class="btn btn-ghost btn-block" style="margin:10px 0 4px; border:1.5px solid var(--navy); color:var(--navy);" onclick="exportExcel('today_report')">⬇️ Export Today's Report (.xlsx)</button>`;
+  html += `<button class="btn btn-ghost btn-block" style="margin:10px 0 4px; border:1.5px solid var(--navy); color:var(--navy);" onclick="viewTodayReport()">👁 View Today's Report</button>`;
 
   /* ---- Monthly Overview ---- */
   html += `<div class="section-title" style="margin-top:18px;">📆 ${monthLabel2} — Monthly Overview</div>
@@ -1053,26 +1127,25 @@ function renderDashboard(t){
   </div>
 
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:6px;">
-    <button class="btn btn-ghost" style="border:1.5px solid var(--navy); color:var(--navy); justify-content:center;" onclick="exportExcel('today_report')">📅 Today Report</button>
-    <button class="btn btn-ghost" style="border:1.5px solid var(--gold); color:var(--amber); justify-content:center;" onclick="exportExcel('monthly_balance')">📆 Balance Sheet</button>
+    <button class="btn btn-ghost" style="border:1.5px solid var(--navy); color:var(--navy); justify-content:center;" onclick="viewTodayReport()">📅 Today Report</button>
+    <button class="btn btn-ghost" style="border:1.5px solid var(--gold); color:var(--amber); justify-content:center;" onclick="viewMonthlyBalance()">📆 Balance Sheet</button>
   </div>`;
 
-  /* ---- Overdue alerts ---- */
-  const overdueLoans=[], dueTodayLoans=[];
-  state.loans.forEach(l=>{
-    const s=loanStatus(l); const c=getCustomer(l.customerId); if(!c) return;
-    if(s.overdue>0) overdueLoans.push({l,c,s});
-    else if(s.dueToday>0) dueTodayLoans.push({l,c,s});
-  });
-  overdueLoans.sort((a,b)=>b.s.overdue-a.s.overdue);
-
-  if(overdueLoans.length){
-    html += `<div class="section-title">⚠️ Overdue (${overdueLoans.length})</div>`;
-    html += overdueLoans.map(({l,c,s})=>loanRowMini(l,c,s,'danger')).join('');
-  }
-  if(!overdueLoans.length && !dueTodayLoans.length && !td.unpaidItems.length){
-    html += `<div class="card ok" style="text-align:center; color:var(--green);">✓ All clear — no overdue or unpaid today.</div>`;
-  }
+  /* ---- Trends Chart ---- */
+  const chartPeriod = ui.chartPeriod || 'monthly';
+  const comp = chartPeriod==='weekly' ? weeklyComparison() : monthlyComparison();
+  html += `<div class="section-title">📈 Trends</div>
+  <div style="background:var(--card); border-radius:var(--radius); padding:12px 14px 8px; margin-bottom:14px; box-shadow:var(--shadow);">
+    <div class="seg-row" style="margin-bottom:8px;">
+      <div class="seg-btn ${chartPeriod==='weekly'?'active':''}" onclick="setChartPeriod('weekly')">Weekly</div>
+      <div class="seg-btn ${chartPeriod==='monthly'?'active':''}" onclick="setChartPeriod('monthly')">Monthly</div>
+    </div>
+    <div style="display:flex; justify-content:center; gap:16px; font-size:10.5px; color:var(--ink-soft); margin-bottom:4px;">
+      <span>▉ ${escapeHtml(comp.currentLabel)}</span>
+      <span style="opacity:0.5;">▉ ${escapeHtml(comp.previousLabel)}</span>
+    </div>
+    ${renderComparisonChart(comp)}
+  </div>`;
 
   /* ---- Top referrers ---- */
   const referralCounts={};
@@ -1159,18 +1232,18 @@ function renderAccounts(){
       </div>
     </div>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-      <button class="btn btn-primary btn-sm" style="justify-content:center;" onclick="exportByDate('all','daily')">⬇️ Daily Report</button>
-      <button class="btn btn-primary btn-sm" style="background:var(--navy); justify-content:center;" onclick="exportByDate('all','monthly')">⬇️ Monthly Report</button>
+      <button class="btn btn-primary btn-sm" style="justify-content:center;" onclick="viewByDate('all','daily')">👁 Daily Report</button>
+      <button class="btn btn-primary btn-sm" style="background:var(--navy); justify-content:center;" onclick="viewByDate('all','monthly')">👁 Monthly Report</button>
     </div>
   </div>
 
   <div class="report-row">
-    <div class="report-btn" onclick="exportExcel('all_customers')">
+    <div class="report-btn" onclick="viewAllCustomers()">
       <div class="ic">👥</div>
       <div class="lbl">All Customers</div>
       <div class="sub">Full customer list</div>
     </div>
-    <div class="report-btn" onclick="exportExcel('full_ledger')">
+    <div class="report-btn" onclick="viewFullLedger()">
       <div class="ic">📒</div>
       <div class="lbl">Full Ledger</div>
       <div class="sub">All loans + payments</div>
@@ -1188,8 +1261,8 @@ function renderAccounts(){
           <span style="font-size:11px; color:var(--ink-soft);">${groupCustomers(g.id).length} customers</span>
         </div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--rule);">
-          <button class="btn btn-ghost btn-sm" style="border-radius:0; border:none; background:var(--card); justify-content:center; padding:10px;" onclick="exportByDate('${g.id}','daily')">📅 Date Report</button>
-          <button class="btn btn-ghost btn-sm" style="border-radius:0; border:none; background:var(--card); justify-content:center; padding:10px;" onclick="exportByDate('${g.id}','monthly')">📆 Month Report</button>
+          <button class="btn btn-ghost btn-sm" style="border-radius:0; border:none; background:var(--card); justify-content:center; padding:10px;" onclick="viewByDate('${g.id}','daily')">📅 Date Report</button>
+          <button class="btn btn-ghost btn-sm" style="border-radius:0; border:none; background:var(--card); justify-content:center; padding:10px;" onclick="viewByDate('${g.id}','monthly')">📆 Month Report</button>
         </div>
       </div>
     `).join('')}
@@ -1277,7 +1350,10 @@ function renderLoanCard(l){
   else if(s.dueToday>0) badge = `<span class="badge today">Due today</span>`;
 
   const pct = Math.min(100, Math.round((s.collected/s.totalPayable)*100));
-  const recentCols = [...(l.collections||[])].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3);
+  const recentActivity = [
+    ...(l.collections||[]).map(c=>({...c, _kind:'collect'})),
+    ...(l.skips||[]).map(sk=>({...sk, _kind:'skip'}))
+  ].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3);
 
   return `<div class="loan-card">
     <div class="loan-top">
@@ -1287,7 +1363,10 @@ function renderLoanCard(l){
       </div>
       <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
         ${badge}
-        <button class="icon-mini" onclick="confirmDeleteLoan('${l.id}')">🗑</button>
+        <div style="display:flex; gap:2px;">
+          <button class="icon-mini" onclick="event.stopPropagation(); openEditLoan('${l.id}')">✏️</button>
+          <button class="icon-mini" onclick="confirmDeleteLoan('${l.id}')">🗑</button>
+        </div>
       </div>
     </div>
     <div class="loan-progress"><div style="width:${pct}%; background:${s.overdue>0?'var(--maroon)':s.completed?'var(--green)':'var(--navy)'}"></div></div>
@@ -1297,16 +1376,20 @@ function renderLoanCard(l){
         : `Next due: <b class="mono">${fmtINR(s.next.amount)}</b> on ${fmtDate(s.next.dueDate)}`
       }
     </div>
-    ${!s.completed ? `<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-      <button class="btn btn-primary btn-sm" style="justify-content:center; background:var(--green);" onclick="event.stopPropagation(); markPaid('${l.id}')">✓ Mark EMI Paid<br><span style="font-size:10px; font-weight:400; opacity:0.85;">${fmtINR(s.next.amount)}</span></button>
-      <button class="btn btn-ghost btn-sm" style="justify-content:center; border:1.5px solid var(--rule);" onclick="event.stopPropagation(); openCustomCollect('${l.id}')">₹ Custom Amount<br><span style="font-size:10px; font-weight:400; color:var(--ink-soft);">enter any amount</span></button>
+    ${!s.completed ? `<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px;">
+      <button class="btn btn-primary btn-sm" style="justify-content:center; background:var(--green); padding:8px 4px;" onclick="event.stopPropagation(); markPaid('${l.id}')">✓ Paid<br><span style="font-size:9.5px; font-weight:400; opacity:0.85;">${fmtINR(s.next.amount)}</span></button>
+      <button class="btn btn-ghost btn-sm" style="justify-content:center; border:1.5px solid var(--rule); padding:8px 4px;" onclick="event.stopPropagation(); openCustomCollect('${l.id}')">₹ Custom<br><span style="font-size:9.5px; font-weight:400; color:var(--ink-soft);">any amount</span></button>
+      <button class="btn btn-ghost btn-sm" style="justify-content:center; border:1.5px solid var(--amber); color:var(--amber); padding:8px 4px;" onclick="event.stopPropagation(); openMarkSkipped('${l.id}')">⏭ Skipped<br><span style="font-size:9.5px; font-weight:400; color:var(--ink-soft);">not paid today</span></button>
     </div>` : ''}
     <button class="btn btn-ghost btn-sm btn-block" style="margin-top:8px; color:var(--navy);" onclick="event.stopPropagation(); openLoanHistory('${l.id}')">📋 View Full EMI History</button>
-    ${recentCols.length ? `<div style="margin-top:10px; border-top:1px dashed var(--rule); padding-top:8px;">
-      <div style="font-size:10px; text-transform:uppercase; letter-spacing:0.4px; color:var(--ink-soft); margin-bottom:6px;">Recent Collections</div>
-      ${recentCols.map(col=>`<div style="display:flex; justify-content:space-between; font-size:11.5px; padding:3px 0; border-bottom:1px dotted var(--rule);">
-        <span style="color:var(--ink-soft);">${fmtDate(col.date)}${col.note?' · '+escapeHtml(col.note):''}</span>
-        <span class="mono" style="color:var(--green); font-weight:600;">+${fmtINR(col.amount)}</span>
+    ${recentActivity.length ? `<div style="margin-top:10px; border-top:1px dashed var(--rule); padding-top:8px;">
+      <div style="font-size:10px; text-transform:uppercase; letter-spacing:0.4px; color:var(--ink-soft); margin-bottom:6px;">Recent Activity</div>
+      ${recentActivity.map(a=>a._kind==='skip' ? `<div style="display:flex; justify-content:space-between; font-size:11.5px; padding:3px 0; border-bottom:1px dotted var(--rule);">
+        <span style="color:var(--ink-soft);">${fmtDate(a.date)}${a.note?' · '+escapeHtml(a.note):''}</span>
+        <span class="mono" style="color:var(--amber); font-weight:600;">⏭ Skipped</span>
+      </div>` : `<div style="display:flex; justify-content:space-between; font-size:11.5px; padding:3px 0; border-bottom:1px dotted var(--rule);">
+        <span style="color:var(--ink-soft);">${fmtDate(a.date)}${a.note?' · '+escapeHtml(a.note):''}</span>
+        <span class="mono" style="color:var(--green); font-weight:600;">+${fmtINR(a.amount)}</span>
       </div>`).join('')}
     </div>` : ''}
   </div>`;
@@ -1333,11 +1416,15 @@ function modalBody(){
   if(m.type==='addCustomer') return customerForm(null, m.payload.groupId);
   if(m.type==='editCustomer') return customerForm(m.payload, null);
   if(m.type==='addLoan') return loanForm(m.payload.customerId);
+  if(m.type==='editLoan') return editLoanForm(m.payload.loanId);
   if(m.type==='customCollect') return customCollectForm(m.payload.loanId);
+  if(m.type==='editCollection') return editCollectionForm(m.payload.loanId, m.payload.colId);
+  if(m.type==='markSkipped') return skipForm(m.payload.loanId);
   if(m.type==='loanHistory') return loanHistoryModal(m.payload.loanId);
   if(m.type==='addTransaction') return transactionForm(m.payload.type);
   if(m.type==='settings') return settingsForm();
   if(m.type==='confirm') return confirmForm(m.payload);
+  if(m.type==='reportView') return reportViewModal(m.payload);
   return '';
 }
 
@@ -1482,6 +1569,52 @@ async function saveLoan(customerId){
   await saveData();
   closeModal();
   showToast('Loan created');
+}
+
+function openEditLoan(loanId){ ui.modal={type:'editLoan', payload:{loanId}}; render(); }
+function editLoanForm(loanId){
+  const l = state.loans.find(x=>x.id===loanId);
+  const c = getCustomer(l.customerId);
+  return `<div class="sheet-handle"></div>
+    <h2>Edit Loan — ${escapeHtml(c.name)}</h2>
+    <div class="preview-box">Rate (${l.rate}%) and frequency (${l.frequency}) can't be changed here. Already-recorded collections stay exactly as they are — only the EMI schedule is recalculated from your changes below.</div>
+    <div class="row2">
+      <div class="field"><label>Principal (₹)</label><input id="f_editPrincipal" type="number" value="${l.principal}" oninput="updateEditLoanPreview('${loanId}')"></div>
+      <div class="field"><label>Number of EMIs</label><input id="f_editEmis" type="number" value="${l.numEmis}" oninput="updateEditLoanPreview('${loanId}')"></div>
+    </div>
+    <div class="field"><label>Start date</label><input id="f_editStart" type="date" value="${l.startDate}" oninput="updateEditLoanPreview('${loanId}')"></div>
+    <div class="preview-box" id="editLoanPreview">—</div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEditLoan('${loanId}')">Save Changes</button>
+    </div>`;
+}
+function updateEditLoanPreview(loanId){
+  const l = state.loans.find(x=>x.id===loanId);
+  const principal = parseFloat(document.getElementById('f_editPrincipal').value);
+  const numEmis = parseInt(document.getElementById('f_editEmis').value);
+  const start = document.getElementById('f_editStart').value || l.startDate;
+  const box = document.getElementById('editLoanPreview');
+  if(!principal || !numEmis || principal<=0 || numEmis<=0){ box.innerHTML='Enter valid principal & EMI count.'; return; }
+  const sched = genSchedule(principal, l.rate, numEmis, l.frequency, start);
+  const totalPayable = sched.reduce((s,p)=>s+p.amount,0);
+  const collected = (l.collections||[]).reduce((s,c)=>s+c.amount,0);
+  box.innerHTML = `New total payable: <b>${fmtINR(totalPayable)}</b><br>Already collected: <b>${fmtINR(collected)}</b> (unchanged)<br>New EMI: <b>${fmtINR(sched[0].amount)}</b> × ${numEmis} (${l.frequency})<br>First due: <b>${fmtDate(sched[0].dueDate)}</b> · Last due: <b>${fmtDate(sched[sched.length-1].dueDate)}</b>`;
+}
+async function saveEditLoan(loanId){
+  const l = state.loans.find(x=>x.id===loanId);
+  const principal = parseFloat(document.getElementById('f_editPrincipal').value);
+  const numEmis = parseInt(document.getElementById('f_editEmis').value);
+  const start = document.getElementById('f_editStart').value || l.startDate;
+  if(!principal || principal<=0){ showToast('Enter a valid principal amount'); return; }
+  if(!numEmis || numEmis<=0){ showToast('Enter number of EMIs'); return; }
+  l.principal = principal;
+  l.numEmis = numEmis;
+  l.startDate = start;
+  l.payments = genSchedule(principal, l.rate, numEmis, l.frequency, start);
+  await saveData();
+  closeModal();
+  showToast('Loan updated');
 }
 
 const EXPENSE_CATEGORIES = ['Travel','Staff / Salary','Office / Rent','Stationery','Phone / Recharge','Food','Maintenance','Other'];
@@ -1721,6 +1854,91 @@ async function saveCustomCollect(loanId){
   showToast('Payment of '+fmtINR(amount)+' recorded');
 }
 
+/* ---------------- Edit / Delete a Collection Entry ---------------- */
+function openEditCollection(loanId, colId){ ui.modal={type:'editCollection', payload:{loanId, colId}}; render(); }
+function editCollectionForm(loanId, colId){
+  const l = state.loans.find(x=>x.id===loanId);
+  const col = (l.collections||[]).find(c=>c.id===colId);
+  return `<div class="sheet-handle"></div>
+    <h2>Edit Collection Entry</h2>
+    <div class="row2">
+      <div class="field"><label>Amount Collected (₹)</label><input id="f_editColAmount" type="number" value="${col.amount}"></div>
+      <div class="field"><label>Date</label><input id="f_editColDate" type="date" value="${col.date}"></div>
+    </div>
+    <div class="field"><label>Note (optional)</label><input id="f_editColNote" value="${escapeAttr(col.note||'')}" placeholder="e.g. Partial payment"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEditCollection('${loanId}','${colId}')">Save</button>
+    </div>
+    <button class="btn btn-danger btn-block" style="margin-top:10px;" onclick="confirmDeleteCollection('${loanId}','${colId}')">🗑 Delete This Entry</button>`;
+}
+async function saveEditCollection(loanId, colId){
+  const l = state.loans.find(x=>x.id===loanId);
+  const col = (l.collections||[]).find(c=>c.id===colId);
+  const amount = parseFloat(document.getElementById('f_editColAmount').value);
+  const date = document.getElementById('f_editColDate').value || col.date;
+  const note = document.getElementById('f_editColNote').value.trim() || null;
+  if(!amount || amount<=0){ showToast('Enter a valid amount'); return; }
+  col.amount = amount; col.date = date; col.note = note;
+  await saveData();
+  openLoanHistory(loanId);
+  showToast('Collection updated');
+}
+function confirmDeleteCollection(loanId, colId){
+  ui.modal = {type:'confirm', payload:{
+    title:'Delete this collection entry?',
+    msg:'This will remove this payment record and reduce the amount collected for this loan. This cannot be undone.',
+    action:`deleteCollection('${loanId}','${colId}')`
+  }};
+  render();
+}
+async function deleteCollection(loanId, colId){
+  const l = state.loans.find(x=>x.id===loanId);
+  l.collections = (l.collections||[]).filter(c=>c.id!==colId);
+  await saveData();
+  openLoanHistory(loanId);
+  showToast('Collection entry deleted');
+}
+
+/* ---------------- Mark EMI as Skipped ---------------- */
+function openMarkSkipped(loanId){ ui.modal={type:'markSkipped', payload:{loanId}}; render(); }
+function skipForm(loanId){
+  return `<div class="sheet-handle"></div>
+    <h2>Mark EMI as Skipped</h2>
+    <div class="preview-box">This records that no payment was collected on this date. It does <b>not</b> reduce the amount owed — it stays in Outstanding/Overdue. This is just a note for your records.</div>
+    <div class="field"><label>Date</label><input id="f_skipDate" type="date" value="${todayISO()}"></div>
+    <div class="field"><label>Reason (optional)</label><input id="f_skipNote" placeholder="e.g. Customer not home"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" style="background:var(--amber);" onclick="saveSkip('${loanId}')">Mark Skipped</button>
+    </div>`;
+}
+async function saveSkip(loanId){
+  const l = state.loans.find(x=>x.id===loanId);
+  const date = document.getElementById('f_skipDate').value || todayISO();
+  const note = document.getElementById('f_skipNote').value.trim() || null;
+  if(!Array.isArray(l.skips)) l.skips = [];
+  l.skips.push({id:uid('skip'), date, note});
+  await saveData();
+  closeModal();
+  showToast('Marked as skipped');
+}
+function confirmDeleteSkip(loanId, skipId){
+  ui.modal = {type:'confirm', payload:{
+    title:'Delete this skipped entry?',
+    msg:"This will remove the skipped record from this loan's history.",
+    action:`deleteSkip('${loanId}','${skipId}')`
+  }};
+  render();
+}
+async function deleteSkip(loanId, skipId){
+  const l = state.loans.find(x=>x.id===loanId);
+  l.skips = (l.skips||[]).filter(s=>s.id!==skipId);
+  await saveData();
+  openLoanHistory(loanId);
+  showToast('Skipped entry deleted');
+}
+
 /* ---------------- Loan History Modal ---------------- */
 function openLoanHistory(loanId){ ui.modal={type:'loanHistory', payload:{loanId}}; render(); }
 
@@ -1789,16 +2007,289 @@ function loanHistoryModal(loanId){
     ${colLog.length === 0 ? `<div style="font-size:12px; color:var(--ink-soft); padding:8px 0;">No payments recorded yet.</div>` :
       `<div style="overflow-x:auto; margin-bottom:16px;">
         <table class="emi-table">
-          <thead><tr><th>Date</th><th>Amount</th><th>Note</th></tr></thead>
-          <tbody>${colLog.map(col=>`<tr class="row-paid"><td>${fmtDate(col.date)}</td><td class="mono" style="color:var(--green);">+${fmtINR(col.amount)}</td><td style="color:var(--ink-soft);">${escapeHtml(col.note||'—')}</td></tr>`).join('')}</tbody>
+          <thead><tr><th>Date</th><th>Amount</th><th>Note</th><th></th></tr></thead>
+          <tbody>${colLog.map(col=>`<tr class="row-paid"><td>${fmtDate(col.date)}</td><td class="mono" style="color:var(--green);">+${fmtINR(col.amount)}</td><td style="color:var(--ink-soft);">${escapeHtml(col.note||'—')}</td><td style="white-space:nowrap;"><button class="icon-mini" onclick="openEditCollection('${loanId}','${col.id}')">✏️</button><button class="icon-mini" onclick="confirmDeleteCollection('${loanId}','${col.id}')">🗑</button></td></tr>`).join('')}</tbody>
+        </table>
+      </div>`
+    }
+
+    <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink-soft); margin-bottom:6px;">Skipped Days (${(l.skips||[]).length})</div>
+    ${!(l.skips||[]).length ? `<div style="font-size:12px; color:var(--ink-soft); padding:8px 0 16px;">No skipped days recorded.</div>` :
+      `<div style="overflow-x:auto; margin-bottom:16px;">
+        <table class="emi-table">
+          <thead><tr><th>Date</th><th>Reason</th><th></th></tr></thead>
+          <tbody>${[...(l.skips||[])].sort((a,b)=>b.date.localeCompare(a.date)).map(sk=>`<tr class="row-overdue"><td>${fmtDate(sk.date)}</td><td style="color:var(--ink-soft);">${escapeHtml(sk.note||'—')}</td><td style="white-space:nowrap;"><button class="icon-mini" onclick="confirmDeleteSkip('${loanId}','${sk.id}')">🗑</button></td></tr>`).join('')}</tbody>
         </table>
       </div>`
     }
 
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
-      <button class="btn btn-ghost btn-sm" onclick="exportLoanStatement('${loanId}')">⬇️ Export .xlsx</button>
+      <button class="btn btn-ghost btn-sm" onclick="viewLoanStatement('${loanId}')">👁 View / Export</button>
       <button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>
     </div>`;
+}
+
+/* ---------------- In-app Report Viewer ---------------- */
+function openReportView(title, sheets){
+  ui.modal = {type:'reportView', payload:{title, sheets, activeSheet:0}};
+  render();
+}
+function setReportSheet(idx){ ui.modal.payload.activeSheet = idx; renderModal(); }
+function reportViewModal(payload){
+  const {title, sheets, activeSheet} = payload;
+  if(!sheets.length){
+    return `<div class="sheet-handle"></div><h2>${escapeHtml(title)}</h2>
+      <div class="empty"><div class="big">📭</div><p>No data found for this report.</p></div>
+      <button class="btn btn-ghost btn-block" onclick="closeModal()">Close</button>`;
+  }
+  const sheet = sheets[activeSheet] || sheets[0];
+  const cols = sheet.rows.length ? Object.keys(sheet.rows[0]) : [];
+  return `<div class="sheet-handle"></div>
+    <h2 style="margin-bottom:8px;">${escapeHtml(title)}</h2>
+    ${sheets.length>1 ? `<div class="seg-row" style="flex-wrap:wrap;">
+      ${sheets.map((s,i)=>`<div class="seg-btn" style="flex:none; padding:6px 10px; ${i===activeSheet?'background:var(--navy); color:#fff; border-color:var(--navy);':''}" onclick="setReportSheet(${i})">${escapeHtml(s.name)}</div>`).join('')}
+    </div>` : ''}
+    <div style="overflow-x:auto; margin:10px 0 14px; max-height:50vh; overflow-y:auto;">
+      <table class="emi-table">
+        <thead><tr>${cols.map(c=>`<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>
+        <tbody>${sheet.rows.map(r=>`<tr>${cols.map(c=>`<td>${typeof r[c]==='number' ? r[c].toLocaleString('en-IN') : escapeHtml(r[c])}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <button class="btn btn-ghost btn-sm" onclick="downloadCurrentReport()">⬇️ Download .xlsx</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>
+    </div>`;
+}
+function downloadCurrentReport(){
+  if(typeof XLSX === 'undefined'){ showToast('Excel library loading… try again'); return; }
+  const {title, sheets} = ui.modal.payload;
+  const wb = XLSX.utils.book_new();
+  sheets.forEach(s=>{
+    const ws = XLSX.utils.json_to_sheet(s.rows);
+    autoWidth(ws, s.rows);
+    XLSX.utils.book_append_sheet(wb, ws, s.name.slice(0,31));
+  });
+  const safeName = title.replace(/[^a-zA-Z0-9]/g,'_').slice(0,30);
+  XLSX.writeFile(wb, `${safeName}_${todayISO()}.xlsx`);
+  showToast('Downloaded ✓');
+}
+
+/* ---- Report data gatherers (shared by view + download) ---- */
+function gatherTodayReportSheets(){
+  const td = todayStats();
+  const today = todayISO();
+  const givenRows = td.loansGiven.map(l=>{
+    const c=getCustomer(l.customerId); const g=c?getGroup(c.groupId):null;
+    return {'Tab':g?g.name:'','Customer Name':c?c.name:'','Code':c?c.code:'','Mobile':c?c.mobile:'','Area':c?c.area:'','Principal (₹)':l.principal,'Interest Rate (%)':l.rate,'No. of EMIs':l.numEmis,'Frequency':l.frequency,'Start Date':fmtDate(l.startDate),'Total Payable (₹)':Math.round(l.principal*(1+l.rate/100))};
+  });
+  const colRows = td.collectedItems.map(({l,c,col})=>{
+    const g=c?getGroup(c.groupId):null;
+    const intRatio = l.payments.reduce((s,p)=>s+p.amount,0)>0 ? (l.principal*(l.rate/100))/l.payments.reduce((s,p)=>s+p.amount,0) : 0;
+    return {'Tab':g?g.name:'','Customer Name':c?c.name:'','Code':c?c.code:'','Mobile':c?c.mobile:'','Collected (₹)':col.amount,'Profit Portion (₹)':Math.round(col.amount*intRatio),'Note':col.note||''};
+  });
+  const unpaidRows = td.unpaidItems.map(({l,c,s})=>{
+    const g=c?getGroup(c.groupId):null;
+    return {'Tab':g?g.name:'','Customer Name':c?c.name:'','Code':c?c.code:'','Mobile':c?c.mobile:'','Unpaid Amount (₹)':Math.round(s.dueToday),'Outstanding (₹)':Math.round(s.outstanding)};
+  });
+  const summaryRows=[
+    {'Item':'Date','Value':fmtDate(today)},
+    {'Item':'Loans Given (count)','Value':td.loansGiven.length},
+    {'Item':'Loans Given Amount (₹)','Value':td.loansGivenAmt},
+    {'Item':'Total Collected (₹)','Value':Math.round(td.collectedAmt)},
+    {'Item':'Collections Count','Value':td.collectedItems.length},
+    {'Item':'Unpaid Today (₹)','Value':Math.round(td.unpaidAmt)},
+    {'Item':'Unpaid Customers','Value':td.unpaidItems.length},
+    {'Item':"Today's Profit (₹)",'Value':Math.round(td.profitAmt)},
+  ];
+  return [
+    {name:'Summary', rows:summaryRows},
+    {name:'Loans Given Today', rows:givenRows},
+    {name:'Collections Today', rows:colRows},
+    {name:'Unpaid Today', rows:unpaidRows}
+  ].filter(s=>s.rows.length);
+}
+function gatherMonthlyBalanceSheets(){
+  const mn = monthlyStats();
+  const totalAssets = state.loans.reduce((s,l)=>s+loanStatus(l).outstanding,0);
+  const bsRows = [
+    {'Category':'INCOME','Item':'Interest Earned (₹)','Amount':Math.round(mn.profitAmt)},
+    {'Category':'INCOME','Item':'Principal Collected (₹)','Amount':Math.round(mn.collectedAmt - mn.profitAmt)},
+    {'Category':'INCOME','Item':'Total Collected (₹)','Amount':Math.round(mn.collectedAmt)},
+    {'Category':'INCOME','Item':'New Investments Received (₹)','Amount':Math.round(mn.monthInvested)},
+    {'Category':'EXPENDITURE','Item':'Loans Disbursed (₹)','Amount':mn.loansGivenAmt},
+    {'Category':'EXPENDITURE','Item':'Withdrawals Made (₹)','Amount':Math.round(mn.monthWithdrawn)},
+    {'Category':'EXPENDITURE','Item':'Operating Expenses (₹)','Amount':Math.round(mn.monthExpenses)},
+    {'Category':'PROFIT','Item':'Net Profit (Interest − Expenses) (₹)','Amount':Math.round(mn.netProfit)},
+    {'Category':'ASSETS','Item':'Total Outstanding Loans (₹)','Amount':Math.round(totalAssets)},
+    {'Category':'ASSETS','Item':'Cash in Hand (₹)','Amount':Math.round(cashInHand())},
+    {'Category':'ASSETS','Item':'Total Assets (₹)','Amount':Math.round(totalAssets+cashInHand())},
+  ];
+  const mColRows = mn.collectionItems.map(({l,c,col})=>{
+    const g=c?getGroup(c.groupId):null;
+    const totalPayable=l.payments.reduce((s,p)=>s+p.amount,0);
+    const intRatio=totalPayable>0?(l.principal*(l.rate/100))/totalPayable:0;
+    return {'Date':fmtDate(col.date),'Tab':g?g.name:'','Customer':c?c.name:'','Code':c?c.code:'','Collected (₹)':col.amount,'Profit Portion (₹)':Math.round(col.amount*intRatio),'Note':col.note||''};
+  }).sort((a,b)=>a['Date'].localeCompare(b['Date']));
+  const expRows = mn.expenseItems.map(t=>({'Date':fmtDate(t.date),'Category':t.category||'Expense','Amount (₹)':t.amount,'Note':t.note||''}));
+  const loanRows = mn.disbursedItems.map(l=>{
+    const c=getCustomer(l.customerId); const g=c?getGroup(c.groupId):null;
+    return {'Date':fmtDate(l.startDate),'Tab':g?g.name:'','Customer':c?c.name:'','Code':c?c.code:'','Principal (₹)':l.principal,'Rate (%)':l.rate,'EMIs':l.numEmis,'Frequency':l.frequency,'Total Payable (₹)':Math.round(l.principal*(1+l.rate/100))};
+  });
+  const outRows = state.customers.map(c=>{
+    const g=getGroup(c.groupId);
+    const loans=customerLoans(c.id);
+    const outstanding=loans.reduce((s,l)=>s+loanStatus(l).outstanding,0);
+    const overdueAmt=loans.reduce((s,l)=>s+loanStatus(l).overdue,0);
+    return {'Tab':g?g.name:'','Customer':c.name,'Code':c.code,'Mobile':c.mobile||'','Active Loans':loans.filter(l=>!loanStatus(l).completed).length,'Outstanding (₹)':Math.round(outstanding),'Overdue (₹)':Math.round(overdueAmt),'Status':customerActive(c.id)?'Active':'Inactive'};
+  }).filter(r=>r['Active Loans']>0);
+  return [
+    {name:'Balance Sheet', rows:bsRows},
+    {name:'Collections', rows:mColRows},
+    {name:'Expenses', rows:expRows},
+    {name:'Loans Disbursed', rows:loanRows},
+    {name:'Outstanding', rows:outRows}
+  ].filter(s=>s.rows.length);
+}
+function gatherAllCustomersSheets(){
+  const rows = state.customers.map(c=>{
+    const g = getGroup(c.groupId);
+    const loans = customerLoans(c.id);
+    const totalLent = loans.reduce((s,l)=>s+l.principal,0);
+    const totalCollected = loans.reduce((s,l)=>s+(l.collections||[]).reduce((t,col)=>t+col.amount,0),0);
+    const outstanding = loans.reduce((s,l)=>s+loanStatus(l).outstanding,0);
+    const referrer = c.referral ? getCustomer(c.referral) : null;
+    return {'Tab':g?g.name:'','Code':c.code,'Customer Name':c.name,'Mobile':c.mobile||'','Area':c.area||'','Join Date':fmtDate(c.joinDate),'Referred By':referrer?referrer.name:'','Total Loans':loans.length,'Total Lent (₹)':totalLent,'Total Collected (₹)':totalCollected,'Outstanding (₹)':Math.round(outstanding),'Status':customerActive(c.id)?'Active':'Inactive'};
+  });
+  return [{name:'Customers', rows}].filter(s=>s.rows.length);
+}
+function gatherFullLedgerSheets(){
+  const today = todayISO();
+  const allCols = [];
+  state.loans.forEach(l=>{
+    const c = getCustomer(l.customerId);
+    const g = c ? getGroup(c.groupId) : null;
+    (l.collections||[]).sort((a,b)=>a.date.localeCompare(b.date)).forEach(col=>{
+      allCols.push({'Date':fmtDate(col.date),'Tab':g?g.name:'','Customer':c?c.name:'','Code':c?c.code:'','Loan Principal (₹)':l.principal,'Rate (%)':l.rate,'Collected (₹)':col.amount,'Note':col.note||''});
+    });
+  });
+  const emiRows = [];
+  state.loans.forEach(l=>{
+    const c = getCustomer(l.customerId);
+    const g = c ? getGroup(c.groupId) : null;
+    const s = loanStatus(l);
+    l.payments.forEach(p=>{
+      const emiCum = l.payments.slice(0, p.emiNo).reduce((t,x)=>t+x.amount, 0);
+      const paidFull = s.collected >= emiCum;
+      const partial = !paidFull && s.collected > emiCum - p.amount;
+      const status = paidFull ? 'Paid' : partial ? 'Partial' : p.dueDate < today ? 'Overdue' : 'Pending';
+      emiRows.push({'Tab':g?g.name:'','Customer':c?c.name:'','Code':c?c.code:'','EMI #':p.emiNo,'Due Date':fmtDate(p.dueDate),'EMI Amount (₹)':p.amount,'Status':status});
+    });
+  });
+  return [{name:'All Collections', rows:allCols},{name:'EMI Schedule', rows:emiRows}].filter(s=>s.rows.length);
+}
+function gatherByDateReport(groupId, period){
+  const dateInput  = document.getElementById('rpt_date');
+  const monthInput = document.getElementById('rpt_month');
+  const selDate  = (dateInput  && dateInput.value)  ? dateInput.value  : todayISO();
+  const selMonth = (monthInput && monthInput.value) ? monthInput.value : todayISO().slice(0,7);
+  const isDaily   = period === 'daily';
+  const dateFilter = isDaily ? (d => d === selDate) : (d => d.startsWith(selMonth));
+  const periodName  = isDaily
+    ? new Date(selDate+'T00:00:00').toLocaleDateString('en-IN',{weekday:'long',day:'2-digit',month:'long',year:'numeric'})
+    : new Date(selMonth+'-01T00:00:00').toLocaleDateString('en-IN',{month:'long',year:'numeric'});
+  const isAllLines = groupId === 'all';
+  const custs = isAllLines ? state.customers : groupCustomers(groupId);
+  const g = isAllLines ? null : getGroup(groupId);
+  const tabLabel = isAllLines ? 'All Lines' : (g ? g.name : '');
+
+  const colRows = [];
+  custs.forEach(c => {
+    const grp = getGroup(c.groupId);
+    customerLoans(c.id).forEach(l => {
+      (l.collections||[]).filter(col => dateFilter(col.date)).sort((a,b)=>a.date.localeCompare(b.date)).forEach(col => {
+        const totalPayable = l.payments.reduce((s,p)=>s+p.amount,0);
+        const intRatio = totalPayable > 0 ? (l.principal*(l.rate/100))/totalPayable : 0;
+        colRows.push({'Date':fmtDate(col.date),'Line':grp?grp.name:'','Customer Name':c.name,'Code':c.code,'Mobile':c.mobile||'','Area':c.area||'','Loan Amount (₹)':l.principal,'Rate (%)':l.rate,'Frequency':l.frequency,'Collected (₹)':col.amount,'Profit (₹)':Math.round(col.amount*intRatio),'Note':col.note||''});
+      });
+    });
+  });
+
+  const unpaidRows = [];
+  custs.forEach(c => {
+    const grp = getGroup(c.groupId);
+    customerLoans(c.id).forEach(l => {
+      const s = loanStatus(l);
+      l.payments.filter(p => dateFilter(p.dueDate)).forEach(p => {
+        const emiCum = l.payments.slice(0, p.emiNo).reduce((t,x)=>t+x.amount, 0);
+        const isPaid = s.collected >= emiCum;
+        if(!isPaid){
+          unpaidRows.push({'Due Date':fmtDate(p.dueDate),'Line':grp?grp.name:'','Customer Name':c.name,'Code':c.code,'Mobile':c.mobile||'','EMI #':p.emiNo,'EMI Amount (₹)':p.amount,'Outstanding (₹)':Math.round(s.outstanding),'Status':p.dueDate<todayISO()?'Overdue':'Pending'});
+        }
+      });
+    });
+  });
+
+  const loanRows = [];
+  if(!isDaily){
+    custs.forEach(c => {
+      const grp = getGroup(c.groupId);
+      customerLoans(c.id).filter(l => l.startDate.startsWith(selMonth)).forEach(l => {
+        loanRows.push({'Date':fmtDate(l.startDate),'Line':grp?grp.name:'','Customer Name':c.name,'Code':c.code,'Mobile':c.mobile||'','Principal (₹)':l.principal,'Rate (%)':l.rate,'No. of EMIs':l.numEmis,'Frequency':l.frequency,'Total Payable (₹)':Math.round(l.principal*(1+l.rate/100))});
+      });
+    });
+  }
+
+  const totalCollected = colRows.reduce((s,r)=>s+r['Collected (₹)'],0);
+  const totalProfit    = colRows.reduce((s,r)=>s+r['Profit (₹)'],0);
+  const totalUnpaid    = unpaidRows.reduce((s,r)=>s+r['EMI Amount (₹)'],0);
+  const totalLent      = loanRows.reduce((s,r)=>s+r['Principal (₹)'],0);
+  const summaryRows = [
+    { 'Item': 'Line / Tab', 'Value': tabLabel },
+    { 'Item': 'Report Period', 'Value': periodName },
+    { 'Item': 'Total Collected (₹)', 'Value': Math.round(totalCollected) },
+    { 'Item': 'No. of Collections', 'Value': colRows.length },
+    { 'Item': 'Profit / Interest Earned (₹)', 'Value': Math.round(totalProfit) },
+    { 'Item': 'Unpaid / Overdue EMIs (₹)', 'Value': Math.round(totalUnpaid) },
+    { 'Item': 'Unpaid Count', 'Value': unpaidRows.length },
+    ...(!isDaily ? [
+      { 'Item': 'New Loans Given (₹)', 'Value': Math.round(totalLent) },
+      { 'Item': 'New Loans Count', 'Value': loanRows.length },
+    ] : []),
+  ];
+  const sheets = [
+    {name:'Summary', rows:summaryRows},
+    {name:'Collections', rows:colRows},
+    {name:'Unpaid', rows:unpaidRows},
+    {name:'Loans Given', rows:loanRows}
+  ].filter(s=>s.rows.length);
+  return {title:`${tabLabel} — ${periodName}`, sheets};
+}
+function gatherLoanStatementSheets(loanId){
+  const l = state.loans.find(x=>x.id===loanId);
+  const s = loanStatus(l);
+  const today = todayISO();
+  const emiRows = l.payments.map(p=>{
+    const emiCum = l.payments.slice(0, p.emiNo).reduce((t,x)=>t+x.amount, 0);
+    const paidFull = s.collected >= emiCum;
+    const partial = !paidFull && s.collected > emiCum - p.amount;
+    const status = paidFull ? 'Paid' : partial ? 'Partial' : p.dueDate < today ? 'Overdue' : 'Pending';
+    return { 'EMI #': p.emiNo, 'Due Date': fmtDate(p.dueDate), 'Amount (₹)': p.amount, 'Status': status };
+  });
+  const colRows = [...(l.collections||[])].sort((a,b)=>a.date.localeCompare(b.date)).map(col=>({'Date': fmtDate(col.date), 'Amount Collected (₹)': col.amount, 'Note': col.note||''}));
+  const skipRows = [...(l.skips||[])].sort((a,b)=>a.date.localeCompare(b.date)).map(sk=>({'Date':fmtDate(sk.date),'Reason':sk.note||''}));
+  return [{name:'EMI Schedule', rows:emiRows},{name:'Collections', rows:colRows},{name:'Skipped Days', rows:skipRows}].filter(s=>s.rows.length);
+}
+
+/* ---- View wrapper functions used by buttons ---- */
+function viewTodayReport(){ openReportView("Today's Report", gatherTodayReportSheets()); }
+function viewMonthlyBalance(){ openReportView(`Balance Sheet — ${todayISO().slice(0,7)}`, gatherMonthlyBalanceSheets()); }
+function viewAllCustomers(){ openReportView('All Customers', gatherAllCustomersSheets()); }
+function viewFullLedger(){ openReportView('Full Ledger', gatherFullLedgerSheets()); }
+function viewByDate(groupId, period){ const r = gatherByDateReport(groupId, period); openReportView(r.title, r.sheets); }
+function viewLoanStatement(loanId){
+  const l = state.loans.find(x=>x.id===loanId);
+  const c = getCustomer(l.customerId);
+  openReportView(`Loan Statement — ${c?c.code:''}`, gatherLoanStatementSheets(loanId));
 }
 
 /* ---------------- Excel Export ---------------- */
