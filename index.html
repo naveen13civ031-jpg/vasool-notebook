@@ -758,27 +758,31 @@ function genSchedule(principal, rate, numEmis, freq, startDate){
   }
   return payments;
 }
+const WEEKDAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+function todayWeekdayName(){
+  return WEEKDAY_NAMES[new Date(todayISO()+'T00:00:00').getDay()];
+}
 function loanStatus(loan){
-  const today = todayISO();
   const totalPayable = loan.payments.reduce((s,p)=>s+p.amount,0);
   const collected = (loan.collections||[]).reduce((s,c)=>s+c.amount,0);
   const outstanding = Math.max(0, totalPayable - collected);
   const completed = collected >= totalPayable;
-
-  let cumBefore = 0, cumThrough = 0;
-  loan.payments.forEach(p=>{
-    if(p.dueDate < today) cumBefore += p.amount;
-    if(p.dueDate <= today) cumThrough += p.amount;
-  });
-  const overdue = Math.max(0, cumBefore - collected);
-  const dueToday = Math.max(0, (cumThrough - collected) - overdue);
 
   let cum = 0, next = null;
   for(const p of loan.payments){
     cum += p.amount;
     if(cum > collected + 0.001){ next = p; break; }
   }
-  return {totalPayable, collected, outstanding, overdue, dueToday, next, completed};
+
+  // Collection-day based due: only show an amount due if today matches
+  // this loan's designated collection day. Otherwise there's nothing to
+  // collect today (they only pay on their collection day, not by EMI due date).
+  const collectionDay = loan.collectionDay || '';
+  const isCollectionDayToday = !completed && collectionDay && collectionDay === todayWeekdayName();
+  const emiAmt = next ? next.amount : (loan.payments.length ? loan.payments[loan.payments.length-1].amount : 0);
+  const dueToday = isCollectionDayToday ? Math.min(emiAmt, outstanding) : 0;
+
+  return {totalPayable, collected, outstanding, dueToday, next, completed, collectionDay, isCollectionDayToday};
 }
 function getGroup(id){ return state.groups.find(g=>g.id===id); }
 function getCustomer(id){ return state.customers.find(c=>c.id===id); }
@@ -793,13 +797,13 @@ function customerActive(custId){
 }
 
 function allTotals(){
-  let overdue=0, dueToday=0, outstanding=0, activeLoans=0;
+  let dueToday=0, outstanding=0, activeLoans=0;
   state.loans.forEach(l=>{
     const s = loanStatus(l);
-    overdue += s.overdue; dueToday += s.dueToday; outstanding += s.outstanding;
+    dueToday += s.dueToday; outstanding += s.outstanding;
     if(!s.completed) activeLoans++;
   });
-  return {overdue,dueToday,outstanding,activeLoans};
+  return {dueToday,outstanding,activeLoans};
 }
 
 function txTotals(){
@@ -1012,7 +1016,6 @@ function renderSummaryRow(t){
       <div class="stat"><div class="v mono">${state.customers.length}</div><div class="l">Customers</div></div>
       <div class="stat"><div class="v mono">${fmtINR(t.outstanding)}</div><div class="l">Outstanding</div></div>
       <div class="stat warn"><div class="v mono">${fmtINR(t.dueToday)}</div><div class="l">Due Today</div></div>
-      <div class="stat danger"><div class="v mono">${fmtINR(t.overdue)}</div><div class="l">Overdue</div></div>
     </div>`;
 }
 
@@ -1062,10 +1065,10 @@ function renderDashboard(t){
       <div class="ds-val mono">${fmtINR(t.outstanding)}</div>
       <div class="ds-lbl">Total Outstanding</div>
     </div>
-    <div class="dash-stat-card" style="border-color:var(--maroon);">
-      <div class="ds-icon">⚠️</div>
-      <div class="ds-val mono" style="color:var(--maroon);">${fmtINR(t.overdue)}</div>
-      <div class="ds-lbl">Total Overdue</div>
+    <div class="dash-stat-card" style="border-color:var(--amber);">
+      <div class="ds-icon">📅</div>
+      <div class="ds-val mono" style="color:var(--amber);">${fmtINR(t.dueToday)}</div>
+      <div class="ds-lbl">Due Today (Collection Day)</div>
     </div>
   </div>
   <div class="cash-hero" onclick="setTab('accounts')" style="cursor:pointer; margin-bottom:12px;">
@@ -1191,7 +1194,7 @@ function renderDashboard(t){
 
 function loanRowMini(l,c,s,kind){
   const g = getGroup(c.groupId);
-  const amt = kind==='danger' ? s.overdue : s.dueToday;
+  const amt = s.dueToday;
   return `<div class="card ${kind}" onclick="jumpToCustomer('${c.id}')" style="cursor:pointer;">
     <div style="display:flex; justify-content:space-between; align-items:center;">
       <div>
@@ -1347,9 +1350,9 @@ function renderCustomerCard(c){
   const open = ui.expandedCustomerId === c.id;
   const isActive = customerActive(c.id);
   let flagKind = 'ok';
-  let totalOverdue=0, totalDueToday=0;
-  loans.forEach(l=>{ const s=loanStatus(l); totalOverdue+=s.overdue; totalDueToday+=s.dueToday; });
-  if(totalOverdue>0) flagKind='danger'; else if(totalDueToday>0) flagKind='warn';
+  let totalDueToday=0;
+  loans.forEach(l=>{ const s=loanStatus(l); totalDueToday+=s.dueToday; });
+  if(totalDueToday>0) flagKind='warn';
   const flagColor = flagKind==='danger'?'var(--maroon)':flagKind==='warn'?'var(--amber)':'var(--green)';
   const referrer = c.referral ? getCustomer(c.referral) : null;
 
@@ -1377,7 +1380,7 @@ function renderCustomerCard(c){
       <span class="cust-code">${escapeHtml(c.code)}</span>
       <div class="cust-main">
         <div class="cust-name">${escapeHtml(c.name)} <span class="badge ${isActive?'ok':'done'}" style="margin-left:2px;">${isActive?'Active':'Inactive'}</span></div>
-        <div class="cust-sub">${loans.length} loan${loans.length!==1?'s':''} ${totalOverdue>0?`· <span style="color:var(--maroon)">${fmtINR(totalOverdue)} overdue</span>`:''}</div>
+        <div class="cust-sub">${loans.length} loan${loans.length!==1?'s':''} ${totalDueToday>0?`· <span style="color:var(--amber)">${fmtINR(totalDueToday)} due today</span>`:''}</div>
       </div>
       <span class="cust-flag" style="background:${flagColor}"></span>
       <span class="chev">${open?'▲':'▼'}</span>
@@ -1390,8 +1393,9 @@ function renderLoanCard(l){
   const s = loanStatus(l);
   let badge = `<span class="badge ok">On track</span>`;
   if(s.completed) badge = `<span class="badge done">✓ Completed</span>`;
-  else if(s.overdue>0) badge = `<span class="badge overdue">${fmtINR(s.overdue)} overdue</span>`;
-  else if(s.dueToday>0) badge = `<span class="badge today">Due today</span>`;
+  else if(s.dueToday>0) badge = `<span class="badge today">${fmtINR(s.dueToday)} due today</span>`;
+  else if(!s.collectionDay) badge = `<span class="badge">No collection day set</span>`;
+  else if(!s.isCollectionDayToday) badge = `<span class="badge" style="background:#EFEFEF; color:#888;">No collection today (${s.collectionDay})</span>`;
 
   const pct = Math.min(100, Math.round((s.collected/s.totalPayable)*100));
   const recentActivity = [
@@ -1404,6 +1408,7 @@ function renderLoanCard(l){
       <div>
         <div class="loan-amt">${fmtINR(l.principal)} <span style="font-size:11px; color:var(--ink-soft); font-weight:400;">@ ${l.rate}% · ${l.numEmis} ${l.frequency} EMIs</span></div>
         <div class="loan-sub">Started ${fmtDate(l.startDate)} · ${fmtINR(s.collected)} of ${fmtINR(s.totalPayable)} collected</div>
+        <div class="loan-sub">Collection day: <b>${s.collectionDay || 'Not set'}</b></div>
       </div>
       <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
         ${badge}
@@ -1413,7 +1418,7 @@ function renderLoanCard(l){
         </div>
       </div>
     </div>
-    <div class="loan-progress"><div style="width:${pct}%; background:${s.overdue>0?'var(--maroon)':s.completed?'var(--green)':'var(--navy)'}"></div></div>
+    <div class="loan-progress"><div style="width:${pct}%; background:${s.completed?'var(--green)':s.dueToday>0?'var(--amber)':'var(--navy)'}"></div></div>
     <div class="loan-next" style="font-size:11.5px; color:var(--ink-soft); margin-bottom:8px;">
       ${s.completed
         ? '✓ Loan fully repaid'
@@ -1628,6 +1633,12 @@ function loanForm(customerId){
       </div>
     </div>
     <div class="field"><label>Start date</label><input id="f_loanStart" type="date" value="${todayISO()}" oninput="updateLoanPreview()"></div>
+    <div class="field"><label>Collection day</label>
+      <select id="f_loanCollectionDay">
+        <option value="">Not set</option>
+        ${WEEKDAY_NAMES.map(d=>`<option value="${d}">${d}</option>`).join('')}
+      </select>
+    </div>
     <div class="preview-box" id="loanPreview">Enter loan details to see the EMI breakdown.</div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
@@ -1660,7 +1671,8 @@ async function saveLoan(customerId){
   if(!numEmis || numEmis<=0){ showToast('Enter number of EMIs'); return; }
   if(isNaN(rate) || rate<0){ showToast('Enter interest rate'); return; }
   const payments = genSchedule(principal, rate, numEmis, freq, start);
-  state.loans.push({id:uid('ln'), customerId, principal, rate, numEmis, frequency:freq, startDate:start, payments, createdAt:todayISO()});
+  const collectionDay = document.getElementById('f_loanCollectionDay').value || '';
+  state.loans.push({id:uid('ln'), customerId, principal, rate, numEmis, frequency:freq, startDate:start, payments, collectionDay, createdAt:todayISO()});
   await saveData();
   closeModal();
   showToast('Loan created');
@@ -1678,6 +1690,12 @@ function editLoanForm(loanId){
       <div class="field"><label>Number of EMIs</label><input id="f_editEmis" type="number" value="${l.numEmis}" oninput="updateEditLoanPreview('${loanId}')"></div>
     </div>
     <div class="field"><label>Start date</label><input id="f_editStart" type="date" value="${l.startDate}" oninput="updateEditLoanPreview('${loanId}')"></div>
+    <div class="field"><label>Collection day</label>
+      <select id="f_editCollectionDay">
+        <option value="" ${!l.collectionDay?'selected':''}>Not set</option>
+        ${WEEKDAY_NAMES.map(d=>`<option value="${d}" ${l.collectionDay===d?'selected':''}>${d}</option>`).join('')}
+      </select>
+    </div>
     <div class="preview-box" id="editLoanPreview">—</div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
@@ -1706,6 +1724,7 @@ async function saveEditLoan(loanId){
   l.principal = principal;
   l.numEmis = numEmis;
   l.startDate = start;
+  l.collectionDay = document.getElementById('f_editCollectionDay').value || '';
   l.payments = genSchedule(principal, l.rate, numEmis, l.frequency, start);
   await saveData();
   closeModal();
@@ -2000,7 +2019,7 @@ function openMarkSkipped(loanId){ ui.modal={type:'markSkipped', payload:{loanId}
 function skipForm(loanId){
   return `<div class="sheet-handle"></div>
     <h2>Mark EMI as Skipped</h2>
-    <div class="preview-box">This records that no payment was collected on this date. It does <b>not</b> reduce the amount owed — it stays in Outstanding/Overdue. This is just a note for your records.</div>
+    <div class="preview-box">This records that no payment was collected on this date. It does <b>not</b> reduce the amount owed — it stays in Outstanding. This is just a note for your records.</div>
     <div class="field"><label>Date</label><input id="f_skipDate" type="date" value="${todayISO()}"></div>
     <div class="field"><label>Reason (optional)</label><input id="f_skipNote" placeholder="e.g. Customer not home"></div>
     <div class="modal-actions">
@@ -2234,8 +2253,8 @@ function gatherMonthlyBalanceSheets(){
     const g=getGroup(c.groupId);
     const loans=customerLoans(c.id);
     const outstanding=loans.reduce((s,l)=>s+loanStatus(l).outstanding,0);
-    const overdueAmt=loans.reduce((s,l)=>s+loanStatus(l).overdue,0);
-    return {'Tab':g?g.name:'','Customer':c.name,'Code':c.code,'Mobile':c.mobile||'','Active Loans':loans.filter(l=>!loanStatus(l).completed).length,'Outstanding (₹)':Math.round(outstanding),'Overdue (₹)':Math.round(overdueAmt),'Status':customerActive(c.id)?'Active':'Inactive'};
+    const dueTodayAmt=loans.reduce((s,l)=>s+loanStatus(l).dueToday,0);
+    return {'Tab':g?g.name:'','Customer':c.name,'Code':c.code,'Mobile':c.mobile||'','Active Loans':loans.filter(l=>!loanStatus(l).completed).length,'Outstanding (₹)':Math.round(outstanding),'Due Today (₹)':Math.round(dueTodayAmt),'Status':customerActive(c.id)?'Active':'Inactive'};
   }).filter(r=>r['Active Loans']>0);
   return [
     {name:'Balance Sheet', rows:bsRows},
@@ -2636,8 +2655,8 @@ function exportExcel(type){
       const g=getGroup(c.groupId);
       const loans=customerLoans(c.id);
       const outstanding=loans.reduce((s,l)=>s+loanStatus(l).outstanding,0);
-      const overdueAmt=loans.reduce((s,l)=>s+loanStatus(l).overdue,0);
-      return {'Tab':g?g.name:'','Customer':c.name,'Code':c.code,'Mobile':c.mobile||'','Active Loans':loans.filter(l=>!loanStatus(l).completed).length,'Outstanding (₹)':Math.round(outstanding),'Overdue (₹)':Math.round(overdueAmt),'Status':customerActive(c.id)?'Active':'Inactive'};
+      const dueTodayAmt=loans.reduce((s,l)=>s+loanStatus(l).dueToday,0);
+      return {'Tab':g?g.name:'','Customer':c.name,'Code':c.code,'Mobile':c.mobile||'','Active Loans':loans.filter(l=>!loanStatus(l).completed).length,'Outstanding (₹)':Math.round(outstanding),'Due Today (₹)':Math.round(dueTodayAmt),'Status':customerActive(c.id)?'Active':'Inactive'};
     }).filter(r=>r['Active Loans']>0);
     if(outRows.length){ const ws=XLSX.utils.json_to_sheet(outRows); autoWidth(ws,outRows); XLSX.utils.book_append_sheet(wb,ws,'Outstanding'); }
 
