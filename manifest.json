@@ -4,8 +4,8 @@
   "description": "Finance Ledger & Collection Manager",
   "start_url": "/vasool-notebook/",
   "display": "standalone",
-  "background_color": "#6C63FF",
-  "theme_color": "#6C63FF",
+  "background_color": "#4F46E5",
+  "theme_color": "#4F46E5",
   "orientation": "portrait",
   "icons": [
     {
