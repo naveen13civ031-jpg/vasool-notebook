@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Finance Ledger</title>
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#1B2A4A">
+<meta name="theme-color" content="#4F46E5">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Finance Ledger">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@500;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
@@ -348,6 +348,46 @@
   .sync-indicator.ok{background:var(--green);}
   .sync-indicator.error{background:var(--maroon);}
   @keyframes pulse{0%,100%{opacity:1;} 50%{opacity:0.4;}}
+</style>
+
+<style id="modern-theme">
+:root{--paper:#F4F5F7;--paper-deep:#E9EBEF;--rule:#E5E7EB;--card:#FFFFFF;--navy:#4F46E5;--navy-light:#6366F1;--maroon:#E11D48;--gold:#4F46E5;--green:#059669;--amber:#D97706;--ink:#0F172A;--ink-soft:#64748B;--shadow:none;--radius:12px}
+body{background:var(--paper)}
+body *{font-family:'Inter',sans-serif !important;font-variant-numeric:tabular-nums}
+.cover{background:var(--paper);color:var(--ink);box-shadow:none;border-radius:0;padding:14px 14px 6px}
+.biz-name{font-size:16px;font-weight:600;color:var(--ink)}
+.icon-btn{background:#fff;border:.5px solid var(--rule);color:var(--ink);border-radius:10px}
+.summary-row{grid-template-columns:repeat(3,1fr);margin-top:12px}
+.stat{display:flex;flex-direction:column-reverse;text-align:left;background:#fff;border:.5px solid var(--rule);padding:10px 12px}
+.stat .v{font-size:16px;font-weight:600;color:var(--ink)}
+.stat .l{font-size:11px;text-transform:none;letter-spacing:0;color:var(--ink-soft);opacity:1;margin:0 0 2px}
+.stat.warn .v,.stat.danger .v{color:var(--amber)}
+.tab-rail{padding:8px 14px 10px;gap:6px}
+.tab-rail .tab-chip{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:999px;background:#fff;color:#475569;border:.5px solid var(--rule);box-shadow:none;opacity:1;transform:none;font-size:13px;font-weight:500}
+.tab-rail .tab-chip.active{background:var(--navy);border-color:var(--navy);color:#fff}
+.tab-rail .tab-chip.addnew{background:transparent;color:var(--navy);border:1px dashed #C7D2FE}
+.tdot{width:8px;height:8px;border-radius:50%;display:inline-block;box-shadow:0 0 0 1.5px #fff}
+.cust-card,.tx-row,.detail-row,.loan-card{box-shadow:none;border:.5px solid var(--rule)}
+.card,.cash-hero,.reinvest-card,.dash-stat-card{box-shadow:none;border-top:.5px solid var(--rule);border-right:.5px solid var(--rule);border-bottom:.5px solid var(--rule)}
+.cust-card,.card,.cash-hero,.reinvest-card,.dash-stat-card,.tx-row{border-radius:12px}
+.loan-card{background:#FAFAFB;border-radius:10px}
+.loan-progress{background:#E5E7EB}
+.cust-flag{display:none}
+.cust-name .badge.ok{display:none}
+.cust-code{background:#EEF2FF;color:#3730A3}
+.cust-avatar.ini{display:flex;align-items:center;justify-content:center;background:#E0E7FF;color:#3730A3;font-weight:600;font-size:13px;border:none}
+.ds-icon{display:none}
+.badge.ok{background:#D1FAE5;color:#047857}.badge.today{background:#FEF3C7;color:#92400E}.badge.overdue{background:#FFE4E6;color:#BE123C}.badge.done{background:#F1F5F9;color:#64748B}
+.btn{border-radius:10px}
+.btn-ghost{background:#fff;border:.5px solid var(--rule)}
+.btn-danger{background:#FFE4E6;color:#BE123C}
+.fab{position:sticky;bottom:12px;left:auto;transform:none;max-width:none;width:auto;margin:8px 14px 12px;background:var(--navy);color:#fff;border-radius:12px;padding:13px;font-size:14px;font-weight:600;box-shadow:0 4px 14px rgba(79,70,229,.3)}
+.fab:active{transform:scale(.97)}
+#app{padding-bottom:8px}
+.sheet{background:#fff;border-radius:20px 20px 0 0}
+.field input,.field select{border:1px solid var(--rule);border-radius:10px}
+.toast{background:#0F172A}
+.auth-card{background:#fff}
 </style>
 </head>
 <body>
@@ -989,9 +1029,9 @@ function render(){
   app.innerHTML = `
     <div class="cover">
       <div class="cover-top">
-        <button class="icon-btn" onclick="toggleSearch()">🔎</button>
+        <button class="icon-btn" onclick="toggleSearch()">${ico('search',18)}</button>
         <h1 class="biz-name" onclick="openSettings()">${escapeHtml(state.businessName)}</h1>
-        <button class="icon-btn" onclick="openSettings()">⚙️</button>
+        <button class="icon-btn" onclick="openSettings()">${ico('sliders',18)}</button>
       </div>
       <div class="search-bar ${ui.searchOpen?'':'hidden'}" style="${ui.searchOpen?'':'display:none'}">
         <input id="searchInput" placeholder="Search name, code, mobile or area…" value="${escapeAttr(ui.searchQuery)}" oninput="onSearch(this.value)">
@@ -1000,15 +1040,15 @@ function render(){
       ${ui.searchOpen ? '' : renderSummaryRow(t)}
     </div>
     <nav class="tab-rail">
-      <div class="tab-chip dashboard ${ui.activeTab==='dashboard'?'active':''}" onclick="setTab('dashboard')">📊 Dashboard</div>
-      <div class="tab-chip dashboard" style="background:var(--gold); color:#2A2110; ${ui.activeTab==='accounts'?'':'opacity:0.62; transform:translateY(4px) scale(0.96);'}" onclick="setTab('accounts')">💰 Accounts</div>
+      <div class="tab-chip dashboard ${ui.activeTab==='dashboard'?'active':''}" onclick="setTab('dashboard')">${ico('grid')} Dashboard</div>
+      <div class="tab-chip dashboard ${ui.activeTab==='accounts'?'active':''}" onclick="setTab('accounts')">${ico('wallet')} Accounts</div>
       ${state.groups.map(g=>`
-        <div class="tab-chip ${ui.activeTab===g.id?'active':''}" style="background:${g.color}" onclick="setTab('${g.id}')">${escapeHtml(g.name)}</div>
+        <div class="tab-chip ${ui.activeTab===g.id?'active':''}" onclick="setTab('${g.id}')"><span class="tdot" style="background:${g.color}"></span>${escapeHtml(g.name)}</div>
       `).join('')}
       <div class="tab-chip addnew" onclick="openAddGroup()">+ Tab</div>
     </nav>
     <main id="mainContent">${ui.activeTab==='dashboard' ? renderDashboard(t) : ui.activeTab==='accounts' ? renderAccounts() : renderGroupView(ui.activeTab)}</main>
-    <button class="fab" onclick="onFab()">${ui.activeTab==='dashboard' ? '➕ New Collection Tab' : ui.activeTab==='accounts' ? '➕ Add Entry' : '➕ Add Customer'}</button>
+    <button class="fab" onclick="onFab()">${ui.activeTab==='dashboard' ? '+ New collection tab' : ui.activeTab==='accounts' ? '+ Add entry' : '+ Add customer'}</button>
   `;
   renderModal();
 }
@@ -1028,7 +1068,7 @@ function renderSearchResults(){
   const hits = state.customers.filter(c =>
     c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q) || (c.mobile||'').includes(q) || (c.area||'').toLowerCase().includes(q)
   ).slice(0,8);
-  if(!hits.length) return `<div style="color:#F2ECDA; font-size:12px; padding:6px 2px;">No matches</div>`;
+  if(!hits.length) return `<div style="color:var(--ink-soft); font-size:12px; padding:6px 2px;">No matches</div>`;
   return hits.map(c=>{
     const g = getGroup(c.groupId);
     return `<div class="search-hit" onclick="jumpToCustomer('${c.id}')">
@@ -1390,7 +1430,7 @@ function renderCustomerCard(c){
 
   return `<div class="cust-card">
     <div class="cust-head" onclick="toggleCustomer('${c.id}')">
-      ${c.photo?`<img class="cust-avatar" src="${c.photo}">`:''}
+      ${c.photo?`<img class="cust-avatar" src="${c.photo}">`:`<span class="cust-avatar ini">${escapeHtml(initialsOf(c.name))}</span>`}
       <span class="cust-code">${escapeHtml(c.code)}</span>
       <div class="cust-main">
         <div class="cust-name">${escapeHtml(c.name)} <span class="badge ${isActive?'ok':'done'}" style="margin-left:2px;">${isActive?'Active':'Inactive'}</span></div>
@@ -3109,6 +3149,14 @@ async function deleteGroup(id){
 }
 
 /* ---------------- Utils ---------------- */
+function initialsOf(n){ return String(n||'').trim().split(/\s+/).slice(0,2).map(w=>Array.from(w)[0]||'').join('').toUpperCase(); }
+const ICONS = {
+  search:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
+  sliders:'<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+  grid:'<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+  wallet:'<path d="M4 7a2 2 0 0 1 2-2h11v4"/><rect x="4" y="9" width="16" height="10" rx="2"/><circle cx="16" cy="14" r="1"/>'
+};
+function ico(name,size){ size=size||15; return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px">${ICONS[name]||''}</svg>`; }
 function escapeHtml(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function escapeAttr(s){ return escapeHtml(s); }
 
