@@ -780,7 +780,10 @@ function loanStatus(loan){
   const collectionDay = loan.collectionDay || '';
   const isCollectionDayToday = !completed && collectionDay && collectionDay === todayWeekdayName();
   const emiAmt = next ? next.amount : (loan.payments.length ? loan.payments[loan.payments.length-1].amount : 0);
-  const dueToday = isCollectionDayToday ? Math.min(emiAmt, outstanding) : 0;
+  const _today = todayISO();
+  const paidToday = (loan.collections||[]).some(c=>c.date===_today);
+  const givenToday = loan.startDate >= _today;
+  const dueToday = (isCollectionDayToday && !paidToday && !givenToday) ? Math.min(emiAmt, outstanding) : 0;
 
   return {totalPayable, collected, outstanding, dueToday, next, completed, collectionDay, isCollectionDayToday};
 }
