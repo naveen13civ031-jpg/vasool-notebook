@@ -1371,7 +1371,18 @@ function renderCustomerCard(c){
   if(!loans.length){
     body += `<div style="font-size:12px; color:var(--ink-soft); padding:6px 0;">No loans yet for this customer.</div>`;
   } else {
-    body += loans.map(l=>renderLoanCard(l)).join('');
+    const active = loans.filter(l=>!loanStatus(l).completed);
+    const done   = loans.filter(l=>loanStatus(l).completed);
+    body += active.map(l=>renderLoanCard(l)).join('');
+    if(!active.length) body += `<div style="font-size:12px; color:var(--ink-soft); padding:6px 0;">No active loans.</div>`;
+    if(done.length){
+      const openDone = ui.completedOpenFor === c.id;
+      body += `<div class="loan-card" style="padding:9px 12px; cursor:pointer;" onclick="event.stopPropagation(); toggleCompleted('${c.id}')">
+        <div style="display:flex; justify-content:space-between; font-size:12.5px; font-weight:600; color:var(--ink-soft);">
+          <span>✓ Completed loans (${done.length})</span><span>${openDone?'▲':'▼'}</span>
+        </div></div>`;
+      if(openDone) body += done.map(l=>renderCompletedLine(l)).join('');
+    }
   }
 
   return `<div class="cust-card">
@@ -1389,6 +1400,17 @@ function renderCustomerCard(c){
   </div>`;
 }
 
+function renderCompletedLine(l){
+  return `<div onclick="event.stopPropagation(); openLoanHistory('${l.id}')"
+    style="display:flex; justify-content:space-between; gap:8px; align-items:center; padding:8px 12px; margin-top:6px; background:var(--paper); border:1px solid var(--rule); border-radius:8px; font-size:12px; cursor:pointer;">
+    <span><b class="mono">${fmtINR(l.principal)}</b> @ ${l.rate}% · ${l.numEmis} ${l.frequency}</span>
+    <span style="color:var(--ink-soft); white-space:nowrap;">${fmtDate(l.startDate)} · ✓ Closed ›</span>
+  </div>`;
+}
+function toggleCompleted(custId){
+  ui.completedOpenFor = ui.completedOpenFor===custId ? null : custId;
+  render();
+}
 function renderLoanCard(l){
   const s = loanStatus(l);
   let badge = `<span class="badge ok">On track</span>`;
@@ -2153,7 +2175,8 @@ function loanHistoryModal(loanId){
 
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
       <button class="btn btn-ghost btn-sm" onclick="viewLoanStatement('${loanId}')">👁 View / Export</button>
-      <button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>
+      <button class="btn btn-ghost btn-sm" onclick="openEditLoan('${loanId}')">✏️ Edit Loan</button>
+      <button class="btn btn-ghost btn-sm" style="grid-column:1 / -1;" onclick="closeModal()">Close</button>
     </div>`;
 }
 
@@ -3048,9 +3071,16 @@ async function toggleCustomerStatus(id){
   showToast(c.statusOverride==='active' ? 'Marked Active' : 'Marked Inactive');
 }
 function confirmDeleteLoan(id){
+  const l = state.loans.find(x=>x.id===id);
+  if(!l) return;
+  const c = getCustomer(l.customerId);
+  const s = loanStatus(l);
+  const n = (l.collections||[]).length;
   ui.modal = {type:'confirm', payload:{
-    title:'Delete loan?',
-    msg:'This will permanently remove this loan and its payment history.',
+    title:'Delete this loan?',
+    msg:`${c?c.name:'Customer'} · ${fmtINR(l.principal)} @ ${l.rate}% (started ${fmtDate(l.startDate)}). `
+      + (n ? `${n} payment record(s) totalling ${fmtINR(s.collected)} will be removed too. ` : 'No payments recorded on this loan. ')
+      + `Cash in hand and profit figures will change. This cannot be undone.`,
     action:`deleteLoan('${id}')`
   }};
   render();
